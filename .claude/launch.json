@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "raport-ie",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8765", "--directory", "C:/Users/User/OneDrive - IFORT SYSTEMS SRL/Desktop/Claude/raport-executie-ie_rezidential"],
+      "port": 8765
+    }
+  ]
+}

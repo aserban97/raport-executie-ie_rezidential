@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1e40af" />
+  <title>Raport Execuție IE — iFort</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <strong>iFort Systems</strong>
+      <span>Raport execuție IE</span>
+    </div>
+    <div id="userBadge" class="user-badge"></div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="raport">Raport zilnic</button>
+    <button class="tab" data-tab="apartamente">Apartamente</button>
+    <button class="tab" data-tab="kpi">KPI</button>
+    <button class="tab" data-tab="setari">Setări</button>
+  </nav>
+
+  <main>
+    <!-- TAB: RAPORT ZILNIC -->
+    <section id="tab-raport" class="tab-panel active">
+      <h2>Raport zilnic</h2>
+      <form id="formRaport" class="card">
+        <label>
+          Data
+          <input type="date" id="data" required />
+        </label>
+
+        <label>
+          Numele tău (cine introduce)
+          <input type="text" id="numeIntrodus" placeholder="ex: Ion" required />
+        </label>
+
+        <fieldset>
+          <legend>Program lucru</legend>
+          <div class="row">
+            <label>
+              Ora start
+              <input type="time" id="oraStart" value="07:00" required />
+            </label>
+            <label>
+              Ora final
+              <input type="time" id="oraFinal" value="17:00" required />
+            </label>
+          </div>
+        </fieldset>
+
+        <label>
+          Nr. total persoane pe șantier
+          <input type="number" id="nrPersoane" min="1" max="100" required />
+        </label>
+
+        <fieldset>
+          <legend>Apartamente / zone lucrate azi</legend>
+          <div id="listaAlocari"></div>
+          <button type="button" class="btn-secondary" id="btnAdaugaAlocare">+ Adaugă apartament/zonă</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Materiale folosite (total zi)</legend>
+          <div id="listaMateriale"></div>
+        </fieldset>
+
+        <label>
+          Observații
+          <textarea id="observatii" rows="3" placeholder="Blocaje, lipsuri, etc."></textarea>
+        </label>
+
+        <div class="actions">
+          <button type="submit" class="btn-primary">Salvează raport</button>
+          <button type="button" class="btn-secondary" id="btnPDF">Generează PDF antreprenor</button>
+        </div>
+      </form>
+
+      <h3>Rapoarte salvate</h3>
+      <div id="listaRapoarte" class="card"></div>
+    </section>
+
+    <!-- TAB: APARTAMENTE -->
+    <section id="tab-apartamente" class="tab-panel">
+      <h2>Lista apartamente</h2>
+      <div class="card">
+        <div class="row">
+          <label>
+            Filtru stare
+            <select id="filtruStare">
+              <option value="">Toate</option>
+              <option value="neinceput">Neînceput</option>
+              <option value="in_lucru">În lucru</option>
+              <option value="gata">Gata</option>
+              <option value="blocat">Blocat</option>
+            </select>
+          </label>
+          <label>
+            Filtru tip
+            <select id="filtruTip">
+              <option value="">Toate</option>
+              <option value="2 camere">2 camere</option>
+              <option value="3 camere">3 camere</option>
+              <option value="4 camere">4 camere</option>
+              <option value="Penthouse">Penthouse</option>
+              <option value="Zona comuna">Zonă comună</option>
+            </select>
+          </label>
+        </div>
+        <div id="hartaApartamente" class="harta"></div>
+      </div>
+
+      <h3>Adaugă apartament / zonă</h3>
+      <form id="formApartament" class="card">
+        <div class="row">
+          <label>
+            Cod (ex: Ap 47, Sc A — Casa scării)
+            <input type="text" id="codAp" required />
+          </label>
+          <label>
+            Tip
+            <select id="tipAp" required>
+              <option value="2 camere">2 camere</option>
+              <option value="3 camere">3 camere</option>
+              <option value="4 camere">4 camere</option>
+              <option value="Penthouse">Penthouse</option>
+              <option value="Zona comuna">Zonă comună</option>
+            </select>
+          </label>
+        </div>
+        <button type="submit" class="btn-primary">Adaugă</button>
+      </form>
+
+      <details class="card">
+        <summary>Adăugare rapidă în serie (ex: Ap 1 — Ap 100)</summary>
+        <div class="row">
+          <label>
+            Prefix
+            <input type="text" id="bulkPrefix" value="Ap " />
+          </label>
+          <label>
+            De la
+            <input type="number" id="bulkStart" value="1" />
+          </label>
+          <label>
+            Până la
+            <input type="number" id="bulkEnd" value="10" />
+          </label>
+          <label>
+            Tip
+            <select id="bulkTip">
+              <option value="2 camere">2 camere</option>
+              <option value="3 camere">3 camere</option>
+              <option value="4 camere">4 camere</option>
+              <option value="Penthouse">Penthouse</option>
+            </select>
+          </label>
+        </div>
+        <button type="button" class="btn-secondary" id="btnBulk">Generează</button>
+      </details>
+    </section>
+
+    <!-- TAB: KPI -->
+    <section id="tab-kpi" class="tab-panel">
+      <h2>KPI Dashboard</h2>
+      <div id="kpiCards" class="kpi-grid"></div>
+      <h3>Consum mediu material / apartament (după tip)</h3>
+      <div id="kpiPerTip" class="card"></div>
+      <h3>Trend ultimele 7 zile</h3>
+      <div id="kpiTrend" class="card"></div>
+    </section>
+
+    <!-- TAB: SETARI -->
+    <section id="tab-setari" class="tab-panel">
+      <h2>Setări</h2>
+      <div class="card">
+        <h3>Materiale</h3>
+        <div id="listaMaterialeAdmin"></div>
+        <form id="formMaterial">
+          <div class="row">
+            <label>
+              Denumire
+              <input type="text" id="materialNume" placeholder="ex: Tub rigid 25mm" required />
+            </label>
+            <label>
+              Unitate
+              <select id="materialUM">
+                <option value="m">m (metri)</option>
+                <option value="buc">buc (bucăți)</option>
+                <option value="kg">kg</option>
+              </select>
+            </label>
+          </div>
+          <button type="submit" class="btn-primary">Adaugă material</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>Date și sincronizare</h3>
+        <p>Toate datele sunt salvate local pe acest dispozitiv.</p>
+        <div class="actions">
+          <button type="button" class="btn-secondary" id="btnExportJSON">Export backup (JSON)</button>
+          <button type="button" class="btn-secondary" id="btnImportJSON">Import backup</button>
+          <input type="file" id="fileImport" accept=".json" hidden />
+          <button type="button" class="btn-secondary" id="btnExportCSV">Export CSV (Excel)</button>
+        </div>
+        <p class="small">Sincronizare Google Sheets — va fi adăugată în Etapa 2.</p>
+      </div>
+
+      <div class="card">
+        <h3>Resetare</h3>
+        <button type="button" class="btn-danger" id="btnReset">Șterge toate datele</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
