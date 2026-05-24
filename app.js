@@ -86,6 +86,7 @@ function adaugaAlocare() {
   const cont = document.getElementById('listaAlocari');
   const row = document.createElement('div');
   row.className = 'alocare-row';
+  const hasApartamente = state.apartamente.length > 0;
   const optionsAp = state.apartamente.map(a =>
     `<option value="${a.cod}">${a.cod} (${a.tip})</option>`
   ).join('');
@@ -95,7 +96,7 @@ function adaugaAlocare() {
       ${optionsAp}
       <option value="__custom__">+ Alt loc (text liber)</option>
     </select>
-    <input type="text" class="ap-custom" placeholder="ex: Tablou subsol" hidden />
+    <input type="text" class="ap-custom" placeholder="ex: Ap 47 sau Tablou subsol" ${hasApartamente ? 'hidden' : ''} />
     <input type="number" class="qty" min="1" max="50" placeholder="Nr. oameni" />
     <select class="stare-noua">
       <option value="">— Stare nouă —</option>
@@ -105,15 +106,19 @@ function adaugaAlocare() {
     </select>
     <button type="button" class="btn-del">×</button>
   `;
+  // Dacă nu există apartamente create, ascunde dropdown-ul și arată direct text liber
+  if (!hasApartamente) {
+    row.querySelector('.ap').style.display = 'none';
+    row.querySelector('.ap').value = '__custom__';
+  }
   row.querySelector('.btn-del').addEventListener('click', () => row.remove());
   row.querySelector('.ap').addEventListener('change', (e) => {
     const customInput = row.querySelector('.ap-custom');
     if (e.target.value === '__custom__') {
       customInput.hidden = false;
-      customInput.required = true;
     } else {
       customInput.hidden = true;
-      customInput.required = false;
+      customInput.value = '';
     }
   });
   cont.appendChild(row);
@@ -128,6 +133,7 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
   const oraStart = document.getElementById('oraStart').value;
   const oraFinal = document.getElementById('oraFinal').value;
   const nrPersoane = parseInt(document.getElementById('nrPersoane').value, 10);
+  const nrElectricieni = parseInt(document.getElementById('nrElectricieni').value, 10) || 0;
   const observatii = document.getElementById('observatii').value.trim();
 
   const alocari = [];
@@ -139,7 +145,7 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
     if (ap) alocari.push({ ap, oameni, stareNoua });
   });
 
-  if (alocari.length === 0) { toast('Adaugă cel puțin un apartament/zonă'); return; }
+  if (alocari.length === 0) { toast('Completează apartamentul / zona la cel puțin un rând'); return; }
 
   const materiale = {};
   document.querySelectorAll('#listaMateriale .qty').forEach(inp => {
@@ -149,7 +155,7 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
 
   const raport = {
     id: uid(), data, utilizator: nume, oraStart, oraFinal,
-    nrPersoane, alocari, materiale, observatii,
+    nrPersoane, nrElectricieni, alocari, materiale, observatii,
     createdAt: new Date().toISOString(),
   };
 
@@ -193,7 +199,7 @@ function renderRapoarte() {
     item.innerHTML = `
       <div class="head">
         <strong>${fmtDate(r.data)}</strong>
-        <span class="info">${r.utilizator || '—'} • ${r.nrPersoane}p • ${r.oraStart}-${r.oraFinal}</span>
+        <span class="info">${r.utilizator || '—'} • ${r.nrPersoane}p (${r.nrElectricieni || 0}el) • ${r.oraStart}-${r.oraFinal}</span>
       </div>
       <div class="info"><b>Lucrat:</b> ${apartLista}</div>
       <div class="info"><b>Material:</b> ${matLista || '—'}</div>
@@ -249,7 +255,7 @@ th{background:#f3f4f6;text-align:left}
 <div class="info-grid">
   <div><b>Data:</b> ${fmtDate(r.data)}</div>
   <div><b>Program:</b> ${r.oraStart} — ${r.oraFinal}</div>
-  <div><b>Persoane pe șantier:</b> ${r.nrPersoane}</div>
+  <div><b>Persoane pe șantier:</b> ${r.nrPersoane} <span style="color:#6b7280">(din care ${r.nrElectricieni || 0} electricieni)</span></div>
   <div><b>Responsabil raport:</b> ${r.utilizator || '—'}</div>
 </div>
 
@@ -352,29 +358,30 @@ function renderKPI() {
   const aps = state.apartamente;
 
   const totalOameni = rapoarte.reduce((s, r) => s + (r.nrPersoane || 0), 0);
+  const totalElectricieni = rapoarte.reduce((s, r) => s + (r.nrElectricieni || 0), 0);
   const totalRapoarte = rapoarte.length;
   const apGata = aps.filter(a => a.stare === 'gata').length;
   const apInLucru = aps.filter(a => a.stare === 'in_lucru').length;
   const apTotal = aps.length;
   const apProcent = apTotal ? Math.round(apGata / apTotal * 100) : 0;
 
-  // Productivitate medie
+  // Productivitate calculată pe electricieni (cei care muncesc efectiv)
   const totalMat = {};
   rapoarte.forEach(r => {
     Object.entries(r.materiale || {}).forEach(([k, v]) => {
       totalMat[k] = (totalMat[k] || 0) + v;
     });
   });
-  const omZile = totalOameni; // 1 om x 1 zi = 1 om-zi (aproximare)
-  const tubPerOmZi = omZile ? (totalMat.tub20 || 0) / omZile : 0;
-  const cyyf25PerOmZi = omZile ? (totalMat.cyyf25 || 0) / omZile : 0;
+  const elZile = totalElectricieni || totalOameni; // fallback: dacă nu sunt electricieni separați, folosește total
+  const tubPerOmZi = elZile ? (totalMat.tub20 || 0) / elZile : 0;
+  const cyyf25PerOmZi = elZile ? (totalMat.cyyf25 || 0) / elZile : 0;
 
   cards.innerHTML = `
     <div class="kpi-card"><div class="val">${apGata}/${apTotal}</div><div class="lbl">Apartamente terminate</div><div class="sub">${apProcent}% din total</div></div>
     <div class="kpi-card"><div class="val">${apInLucru}</div><div class="lbl">În lucru acum</div></div>
     <div class="kpi-card"><div class="val">${totalRapoarte}</div><div class="lbl">Zile raportate</div></div>
-    <div class="kpi-card"><div class="val">${tubPerOmZi.toFixed(1)}</div><div class="lbl">Tub 20mm / om-zi (m)</div></div>
-    <div class="kpi-card"><div class="val">${cyyf25PerOmZi.toFixed(1)}</div><div class="lbl">CYYF 3x2.5 / om-zi (m)</div></div>
+    <div class="kpi-card"><div class="val">${tubPerOmZi.toFixed(1)}</div><div class="lbl">Tub 20mm / electrician-zi (m)</div></div>
+    <div class="kpi-card"><div class="val">${cyyf25PerOmZi.toFixed(1)}</div><div class="lbl">CYYF 3x2.5 / electrician-zi (m)</div></div>
     <div class="kpi-card"><div class="val">${(totalMat.tub20 || 0).toFixed(0)}</div><div class="lbl">Tub 20mm total (m)</div></div>
   `;
 
@@ -427,13 +434,14 @@ function renderKPI() {
   if (ultimeleZile.length === 0) {
     trendCont.innerHTML = '<div class="empty">Niciun raport încă</div>';
   } else {
-    let html = '<table style="width:100%;border-collapse:collapse"><tr><th style="text-align:left;padding:8px;font-size:12px;border-bottom:1px solid #e5e7eb">Data</th><th style="text-align:right;padding:8px;font-size:12px;border-bottom:1px solid #e5e7eb">Oameni</th><th style="text-align:right;padding:8px;font-size:12px;border-bottom:1px solid #e5e7eb">Tub (m)</th><th style="text-align:right;padding:8px;font-size:12px;border-bottom:1px solid #e5e7eb">CYYF 2.5 (m)</th></tr>';
+    let html = '<table style="width:100%;border-collapse:collapse"><tr><th style="text-align:left;padding:8px;font-size:12px;border-bottom:1px solid #e5e7eb">Data</th><th style="text-align:right;padding:8px;font-size:12px;border-bottom:1px solid #e5e7eb">Total / Electr.</th><th style="text-align:right;padding:8px;font-size:12px;border-bottom:1px solid #e5e7eb">Tub (m)</th><th style="text-align:right;padding:8px;font-size:12px;border-bottom:1px solid #e5e7eb">CYYF 2.5 (m)</th></tr>';
     ultimeleZile.forEach(d => {
       const zile = rapoarte.filter(r => r.data === d);
       const oameni = zile.reduce((s, r) => s + (r.nrPersoane || 0), 0);
+      const electricieni = zile.reduce((s, r) => s + (r.nrElectricieni || 0), 0);
       const tub = zile.reduce((s, r) => s + (r.materiale?.tub20 || 0), 0);
       const cyyf = zile.reduce((s, r) => s + (r.materiale?.cyyf25 || 0), 0);
-      html += `<tr><td style="padding:8px;border-bottom:1px solid #f3f4f6">${fmtDate(d)}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #f3f4f6">${oameni}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #f3f4f6">${tub.toFixed(0)}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #f3f4f6">${cyyf.toFixed(0)}</td></tr>`;
+      html += `<tr><td style="padding:8px;border-bottom:1px solid #f3f4f6">${fmtDate(d)}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #f3f4f6">${oameni} / ${electricieni}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #f3f4f6">${tub.toFixed(0)}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #f3f4f6">${cyyf.toFixed(0)}</td></tr>`;
     });
     html += '</table>';
     trendCont.innerHTML = html;
@@ -496,14 +504,14 @@ document.getElementById('fileImport').addEventListener('change', (e) => {
 });
 
 document.getElementById('btnExportCSV').addEventListener('click', () => {
-  const headers = ['Data', 'Utilizator', 'Ora start', 'Ora final', 'Nr persoane', 'Apartamente', 'Observatii'];
+  const headers = ['Data', 'Utilizator', 'Ora start', 'Ora final', 'Nr persoane', 'Nr electricieni', 'Apartamente', 'Observatii'];
   state.materiale.forEach(m => headers.push(`${m.nume} (${m.um})`));
   const rows = [headers.join(',')];
   state.rapoarte.forEach(r => {
     const apartLista = r.alocari.map(a => `${a.ap}${a.oameni ? `(${a.oameni}p)` : ''}`).join('; ');
     const row = [
       r.data, r.utilizator || '', r.oraStart || '', r.oraFinal || '',
-      r.nrPersoane || '', `"${apartLista}"`, `"${(r.observatii || '').replace(/"/g, '""')}"`
+      r.nrPersoane || '', r.nrElectricieni || '', `"${apartLista}"`, `"${(r.observatii || '').replace(/"/g, '""')}"`
     ];
     state.materiale.forEach(m => row.push(r.materiale?.[m.id] || ''));
     rows.push(row.join(','));

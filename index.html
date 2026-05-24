@@ -55,10 +55,16 @@
           </div>
         </fieldset>
 
-        <label>
-          Nr. total persoane pe șantier
-          <input type="number" id="nrPersoane" min="1" max="100" required />
-        </label>
+        <div class="row">
+          <label>
+            Nr. total persoane (incl. ingineri)
+            <input type="number" id="nrPersoane" min="1" max="100" required />
+          </label>
+          <label>
+            Nr. electricieni (lucrează efectiv)
+            <input type="number" id="nrElectricieni" min="0" max="100" required />
+          </label>
+        </div>
 
         <fieldset>
           <legend>Apartamente / zone lucrate azi</legend>
