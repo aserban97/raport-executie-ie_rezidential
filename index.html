@@ -67,20 +67,21 @@
         </div>
 
         <fieldset>
-          <legend>Apartamente / zone lucrate azi</legend>
+          <legend>Apartamente / zone lucrate azi (cu materiale per locație)</legend>
           <div id="listaAlocari"></div>
           <button type="button" class="btn-secondary" id="btnAdaugaAlocare">+ Adaugă apartament/zonă</button>
-        </fieldset>
-
-        <fieldset>
-          <legend>Materiale folosite (total zi)</legend>
-          <div id="listaMateriale"></div>
         </fieldset>
 
         <label>
           Observații
           <textarea id="observatii" rows="3" placeholder="Blocaje, lipsuri, etc."></textarea>
         </label>
+
+        <fieldset>
+          <legend>Poze șantier (opțional, max 4)</legend>
+          <input type="file" id="poze" accept="image/*" multiple capture="environment" />
+          <div id="previewPoze" class="preview-poze"></div>
+        </fieldset>
 
         <div class="actions">
           <button type="submit" class="btn-primary">Salvează raport</button>
@@ -205,6 +206,21 @@
           </div>
           <button type="submit" class="btn-primary">Adaugă material</button>
         </form>
+      </div>
+
+      <div class="card">
+        <h3>Date proiect</h3>
+        <div class="row">
+          <label>
+            Antreprenor general
+            <input type="text" id="antreprenor" value="KESZ" />
+          </label>
+          <label>
+            Șantier / complex
+            <input type="text" id="santier" value="Corallis" />
+          </label>
+        </div>
+        <button type="button" class="btn-primary" id="btnSaveProiect">Salvează</button>
       </div>
 
       <div class="card">

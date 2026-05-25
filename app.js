@@ -18,7 +18,11 @@ let state = {
   apartamente: [],
   materiale: [...MATERIALE_DEFAULT],
   utilizator: '',
+  antreprenor: 'KESZ',
+  santier: 'Corallis',
 };
+
+let pozeCurente = []; // {dataUrl, name} pentru raportul în lucru
 
 // ============= Persistență =============
 function load() {
@@ -62,21 +66,6 @@ document.querySelectorAll('.tab').forEach(btn => {
 });
 
 // ============= Raport zilnic =============
-function renderMateriale() {
-  const cont = document.getElementById('listaMateriale');
-  cont.innerHTML = '';
-  state.materiale.forEach(m => {
-    const row = document.createElement('div');
-    row.className = 'material-row';
-    row.innerHTML = `
-      <span class="nume">${m.nume}</span>
-      <input type="number" class="qty" data-mat="${m.id}" min="0" step="0.1" placeholder="0" />
-      <span class="um">${m.um}</span>
-    `;
-    cont.appendChild(row);
-  });
-}
-
 function renderAlocari() {
   const cont = document.getElementById('listaAlocari');
   if (cont.children.length === 0) adaugaAlocare();
@@ -84,44 +73,52 @@ function renderAlocari() {
 
 function adaugaAlocare() {
   const cont = document.getElementById('listaAlocari');
-  const row = document.createElement('div');
-  row.className = 'alocare-row';
+  const block = document.createElement('div');
+  block.className = 'alocare-block';
   const hasApartamente = state.apartamente.length > 0;
   const optionsAp = state.apartamente.map(a =>
     `<option value="${a.cod}">${a.cod} (${a.tip})</option>`
   ).join('');
-  row.innerHTML = `
-    <select class="ap">
-      <option value="">— Alege apartament/zonă —</option>
-      ${optionsAp}
-      <option value="__custom__">+ Alt loc (text liber)</option>
-    </select>
-    <input type="text" class="ap-custom" placeholder="ex: Ap 47 sau Tablou subsol" ${hasApartamente ? 'hidden' : ''} />
-    <input type="number" class="qty" min="1" max="50" placeholder="Nr. oameni" />
-    <select class="stare-noua">
-      <option value="">— Stare nouă —</option>
-      <option value="in_lucru">În lucru</option>
-      <option value="gata">Gata</option>
-      <option value="blocat">Blocat</option>
-    </select>
-    <button type="button" class="btn-del">×</button>
+  const materialeHTML = state.materiale.map(m => `
+    <div class="alocare-mat-item">
+      <label>${m.nume}</label>
+      <div class="mat-input">
+        <input type="number" class="mat-qty" data-mat="${m.id}" min="0" step="0.1" placeholder="0" />
+        <span class="um-small">${m.um}</span>
+      </div>
+    </div>
+  `).join('');
+
+  block.innerHTML = `
+    <div class="alocare-head">
+      <select class="ap">
+        <option value="">— Alege apartament/zonă —</option>
+        ${optionsAp}
+        <option value="__custom__">+ Alt loc (text liber)</option>
+      </select>
+      <input type="text" class="ap-custom" placeholder="ex: Ap 47 sau Tablou subsol" ${hasApartamente ? 'hidden' : ''} />
+      <input type="number" class="qty-oameni" min="1" max="50" placeholder="Oameni" />
+      <select class="stare-noua">
+        <option value="">— Stare —</option>
+        <option value="in_lucru">În lucru</option>
+        <option value="gata">Gata</option>
+        <option value="blocat">Blocat</option>
+      </select>
+      <button type="button" class="btn-del">×</button>
+    </div>
+    <div class="alocare-materiale">${materialeHTML}</div>
   `;
-  // Dacă nu există apartamente create, ascunde dropdown-ul și arată direct text liber
   if (!hasApartamente) {
-    row.querySelector('.ap').style.display = 'none';
-    row.querySelector('.ap').value = '__custom__';
+    block.querySelector('.ap').style.display = 'none';
+    block.querySelector('.ap').value = '__custom__';
   }
-  row.querySelector('.btn-del').addEventListener('click', () => row.remove());
-  row.querySelector('.ap').addEventListener('change', (e) => {
-    const customInput = row.querySelector('.ap-custom');
-    if (e.target.value === '__custom__') {
-      customInput.hidden = false;
-    } else {
-      customInput.hidden = true;
-      customInput.value = '';
-    }
+  block.querySelector('.btn-del').addEventListener('click', () => block.remove());
+  block.querySelector('.ap').addEventListener('change', (e) => {
+    const customInput = block.querySelector('.ap-custom');
+    if (e.target.value === '__custom__') customInput.hidden = false;
+    else { customInput.hidden = true; customInput.value = ''; }
   });
-  cont.appendChild(row);
+  cont.appendChild(block);
 }
 
 document.getElementById('btnAdaugaAlocare').addEventListener('click', adaugaAlocare);
@@ -137,25 +134,33 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
   const observatii = document.getElementById('observatii').value.trim();
 
   const alocari = [];
-  document.querySelectorAll('#listaAlocari .alocare-row').forEach(row => {
-    let ap = row.querySelector('.ap').value;
-    if (ap === '__custom__') ap = row.querySelector('.ap-custom').value.trim();
-    const oameni = parseInt(row.querySelector('.qty').value, 10) || 0;
-    const stareNoua = row.querySelector('.stare-noua').value;
-    if (ap) alocari.push({ ap, oameni, stareNoua });
+  document.querySelectorAll('#listaAlocari .alocare-block').forEach(block => {
+    let ap = block.querySelector('.ap').value;
+    if (ap === '__custom__') ap = block.querySelector('.ap-custom').value.trim();
+    const oameni = parseInt(block.querySelector('.qty-oameni').value, 10) || 0;
+    const stareNoua = block.querySelector('.stare-noua').value;
+    const materialeAp = {};
+    block.querySelectorAll('.mat-qty').forEach(inp => {
+      const v = parseFloat(inp.value);
+      if (v > 0) materialeAp[inp.dataset.mat] = v;
+    });
+    if (ap) alocari.push({ ap, oameni, stareNoua, materiale: materialeAp });
   });
 
   if (alocari.length === 0) { toast('Completează apartamentul / zona la cel puțin un rând'); return; }
 
+  // Total materiale (sumă peste toate alocările)
   const materiale = {};
-  document.querySelectorAll('#listaMateriale .qty').forEach(inp => {
-    const v = parseFloat(inp.value);
-    if (v > 0) materiale[inp.dataset.mat] = v;
+  alocari.forEach(a => {
+    Object.entries(a.materiale || {}).forEach(([k, v]) => {
+      materiale[k] = (materiale[k] || 0) + v;
+    });
   });
 
   const raport = {
     id: uid(), data, utilizator: nume, oraStart, oraFinal,
-    nrPersoane, nrElectricieni, alocari, materiale, observatii,
+    nrPersoane, nrElectricieni, alocari, materiale,
+    poze: [...pozeCurente], observatii,
     createdAt: new Date().toISOString(),
   };
 
@@ -176,9 +181,56 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
   document.getElementById('data').value = todayISO();
   document.getElementById('numeIntrodus').value = state.utilizator;
   document.getElementById('listaAlocari').innerHTML = '';
+  pozeCurente = [];
+  renderPreviewPoze();
   renderAlocari();
-  renderMateriale();
   toast('Raport salvat ✓');
+});
+
+// ============= Poze =============
+function renderPreviewPoze() {
+  const cont = document.getElementById('previewPoze');
+  cont.innerHTML = '';
+  pozeCurente.forEach((p, i) => {
+    const d = document.createElement('div');
+    d.className = 'poza-thumb';
+    d.innerHTML = `<img src="${p.dataUrl}" /><button type="button" class="del-poza" data-i="${i}">×</button>`;
+    d.querySelector('.del-poza').addEventListener('click', () => {
+      pozeCurente.splice(i, 1); renderPreviewPoze();
+    });
+    cont.appendChild(d);
+  });
+}
+
+function compressImage(file, maxW = 1200, quality = 0.7) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ratio = Math.min(maxW / img.width, maxW / img.height, 1);
+        canvas.width = img.width * ratio;
+        canvas.height = img.height * ratio;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+document.getElementById('poze').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files);
+  for (const f of files) {
+    if (pozeCurente.length >= 4) { toast('Maxim 4 poze'); break; }
+    const dataUrl = await compressImage(f);
+    pozeCurente.push({ dataUrl, name: f.name });
+  }
+  renderPreviewPoze();
+  e.target.value = '';
 });
 
 function renderRapoarte() {
@@ -223,54 +275,133 @@ function renderRapoarte() {
 }
 
 // ============= PDF =============
-function genereazaPDF(r) {
-  const apartLista = r.alocari.map(a => `${a.ap}${a.oameni ? ` (${a.oameni} pers.)` : ''}`).join(', ');
-  const matRows = Object.entries(r.materiale).map(([k, v]) => {
+function matRowsHTML(materialeObj) {
+  const rows = Object.entries(materialeObj || {}).map(([k, v]) => {
     const m = state.materiale.find(x => x.id === k);
     return m ? `<tr><td>${m.nume}</td><td style="text-align:right">${v} ${m.um}</td></tr>` : '';
-  }).join('');
+  }).filter(Boolean).join('');
+  return rows || '<tr><td colspan="2" style="text-align:center;color:#9ca3af">Nicio cantitate</td></tr>';
+}
+
+function genereazaPDF(r) {
+  const antreprenor = state.antreprenor || 'KESZ';
+  const santier = state.santier || 'Corallis';
+
+  // PAGINA 1: TOTAL (pentru screenshot rapid către antreprenor)
+  const totalPage = `
+<div class="page">
+  <div class="header">
+    <img src="logo.png" class="logo" alt="iFort" />
+    <div class="header-text">
+      <div class="company">iFort Systems S.R.L.</div>
+      <div class="sub">Raport zilnic execuție instalații electrice</div>
+    </div>
+  </div>
+
+  <div class="info-grid">
+    <div><b>Data:</b> ${fmtDate(r.data)}</div>
+    <div><b>Program lucru:</b> ${r.oraStart} — ${r.oraFinal}</div>
+    <div><b>Antreprenor general:</b> ${antreprenor}</div>
+    <div><b>Șantier:</b> ${santier}</div>
+    <div><b>Persoane pe șantier:</b> ${r.nrPersoane}</div>
+    <div><b>din care electricieni:</b> ${r.nrElectricieni || 0}</div>
+  </div>
+
+  <h2>Apartamente / zone lucrate azi</h2>
+  <table>
+    <thead><tr><th>Locație</th><th style="text-align:right">Oameni</th><th style="text-align:right">Stare</th></tr></thead>
+    <tbody>
+      ${r.alocari.map(a => `<tr><td>${a.ap}</td><td style="text-align:right">${a.oameni || '—'}</td><td style="text-align:right">${{in_lucru:'În lucru',gata:'Gata',blocat:'Blocat'}[a.stareNoua] || '—'}</td></tr>`).join('')}
+    </tbody>
+  </table>
+
+  <h2>TOTAL materiale folosite</h2>
+  <table>
+    <thead><tr><th>Material</th><th style="text-align:right">Cantitate totală</th></tr></thead>
+    <tbody>${matRowsHTML(r.materiale)}</tbody>
+  </table>
+
+  ${r.observatii ? `<h2>Observații</h2><div class="obs">${r.observatii}</div>` : ''}
+
+  <div class="footer">Document generat — iFort Systems S.R.L.</div>
+</div>`;
+
+  // PAGINI urmatoare: detaliu per apartament
+  const apartPages = r.alocari.map((a, idx) => `
+<div class="page">
+  <div class="header">
+    <img src="logo.png" class="logo" alt="iFort" />
+    <div class="header-text">
+      <div class="company">iFort Systems S.R.L.</div>
+      <div class="sub">Detaliu apartament — ${fmtDate(r.data)}</div>
+    </div>
+  </div>
+
+  <div class="info-grid">
+    <div><b>Locație:</b> ${a.ap}</div>
+    <div><b>Oameni alocați:</b> ${a.oameni || '—'}</div>
+    <div><b>Stare:</b> ${{in_lucru:'În lucru',gata:'Gata',blocat:'Blocat'}[a.stareNoua] || '—'}</div>
+    <div><b>Antreprenor:</b> ${antreprenor}</div>
+  </div>
+
+  <h2>Materiale folosite la această locație</h2>
+  <table>
+    <thead><tr><th>Material</th><th style="text-align:right">Cantitate</th></tr></thead>
+    <tbody>${matRowsHTML(a.materiale)}</tbody>
+  </table>
+
+  <div class="footer">Pagina ${idx + 2} — Document generat — iFort Systems S.R.L.</div>
+</div>`).join('');
+
+  // PAGINA finală: poze (dacă există)
+  const pozePage = r.poze && r.poze.length > 0 ? `
+<div class="page">
+  <div class="header">
+    <img src="logo.png" class="logo" alt="iFort" />
+    <div class="header-text">
+      <div class="company">iFort Systems S.R.L.</div>
+      <div class="sub">Poze șantier — ${fmtDate(r.data)}</div>
+    </div>
+  </div>
+  <div class="poze-grid">
+    ${r.poze.map(p => `<div class="poza"><img src="${p.dataUrl}" /></div>`).join('')}
+  </div>
+  <div class="footer">Document generat — iFort Systems S.R.L.</div>
+</div>` : '';
 
   const html = `
 <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Raport ${fmtDate(r.data)}</title>
 <style>
-body{font-family:Arial,sans-serif;padding:30px;color:#111;max-width:780px;margin:auto}
-h1{color:#1e40af;border-bottom:3px solid #1e40af;padding-bottom:10px;margin-bottom:5px}
-.sub{color:#6b7280;margin-bottom:25px;font-size:13px}
-h2{font-size:15px;color:#374151;margin-top:25px;margin-bottom:8px;border-bottom:1px solid #e5e7eb;padding-bottom:4px}
+*{box-sizing:border-box}
+body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
+.page{background:white;padding:30px;max-width:780px;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1);page-break-after:always}
+.page:last-child{page-break-after:auto}
+.header{display:flex;align-items:center;gap:18px;border-bottom:3px solid #1e40af;padding-bottom:12px;margin-bottom:18px}
+.header .logo{width:80px;height:auto;object-fit:contain}
+.header-text .company{font-size:22px;font-weight:700;color:#1e40af;line-height:1.1}
+.header-text .sub{font-size:13px;color:#6b7280;margin-top:3px}
+h2{font-size:15px;color:#374151;margin-top:22px;margin-bottom:8px;border-bottom:1px solid #e5e7eb;padding-bottom:4px}
 table{width:100%;border-collapse:collapse;margin-top:8px}
 td,th{padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:14px}
-th{background:#f3f4f6;text-align:left}
-.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:#f9fafb;padding:14px;border-radius:8px}
+th{background:#f3f4f6;text-align:left;font-weight:600}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:#f9fafb;padding:14px;border-radius:8px;margin-bottom:12px}
 .info-grid div{font-size:14px}
 .info-grid b{color:#1e40af}
-.obs{background:#fef3c7;padding:12px;border-radius:6px;font-size:13px;margin-top:10px}
-.footer{margin-top:40px;padding-top:15px;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;text-align:center}
-@media print{body{padding:15px}.no-print{display:none}}
+.obs{background:#fef3c7;padding:12px;border-radius:6px;font-size:13px;margin-top:8px}
+.footer{margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center}
+.poze-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.poza img{width:100%;border-radius:6px;border:1px solid #d1d5db}
+.no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;z-index:1000;box-shadow:0 2px 6px rgba(0,0,0,0.2)}
+@media print{
+  body{background:white}
+  .page{margin:0;box-shadow:none;max-width:100%}
+  .no-print{display:none}
+}
 </style></head><body>
-<button class="no-print" onclick="window.print()" style="float:right;padding:10px 20px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer">🖨️ Tipărește / Salvează PDF</button>
-<h1>iFort Systems S.R.L.</h1>
-<div class="sub">Raport zilnic execuție instalații electrice</div>
-
-<h2>Informații generale</h2>
-<div class="info-grid">
-  <div><b>Data:</b> ${fmtDate(r.data)}</div>
-  <div><b>Program:</b> ${r.oraStart} — ${r.oraFinal}</div>
-  <div><b>Persoane pe șantier:</b> ${r.nrPersoane} <span style="color:#6b7280">(din care ${r.nrElectricieni || 0} electricieni)</span></div>
-  <div><b>Responsabil raport:</b> ${r.utilizator || '—'}</div>
-</div>
-
-<h2>Apartamente / zone lucrate</h2>
-<p>${apartLista}</p>
-
-<h2>Materiale folosite</h2>
-<table>
-  <thead><tr><th>Material</th><th style="text-align:right">Cantitate</th></tr></thead>
-  <tbody>${matRows || '<tr><td colspan="2" style="text-align:center;color:#9ca3af">Nicio cantitate</td></tr>'}</tbody>
-</table>
-
-${r.observatii ? `<h2>Observații</h2><div class="obs">${r.observatii}</div>` : ''}
-
-<div class="footer">Document generat automat — iFort Systems S.R.L.</div>
+<button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
+${totalPage}
+${apartPages}
+${pozePage}
 </body></html>`;
 
   const w = window.open('', '_blank');
@@ -450,6 +581,8 @@ function renderKPI() {
 
 // ============= Setări =============
 function renderSetari() {
+  document.getElementById('antreprenor').value = state.antreprenor || 'KESZ';
+  document.getElementById('santier').value = state.santier || 'Corallis';
   const cont = document.getElementById('listaMaterialeAdmin');
   cont.innerHTML = '';
   state.materiale.forEach((m, i) => {
@@ -474,8 +607,15 @@ document.getElementById('formMaterial').addEventListener('submit', (e) => {
   const um = document.getElementById('materialUM').value;
   const id = nume.toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + uid().slice(0, 4);
   state.materiale.push({ id, nume, um });
-  save(); renderSetari(); renderMateriale(); e.target.reset();
-  toast('Material adăugat ✓');
+  save(); renderSetari(); e.target.reset();
+  toast('Material adăugat ✓ (vizibil la următorul raport)');
+});
+
+document.getElementById('btnSaveProiect').addEventListener('click', () => {
+  state.antreprenor = document.getElementById('antreprenor').value.trim() || 'KESZ';
+  state.santier = document.getElementById('santier').value.trim() || 'Corallis';
+  save();
+  toast('Date proiect salvate ✓');
 });
 
 document.getElementById('btnExportJSON').addEventListener('click', () => {
@@ -537,10 +677,10 @@ function renderUserBadge() {
 
 // ============= Init =============
 function renderAll() {
-  renderMateriale();
   renderAlocari();
   renderRapoarte();
   renderUserBadge();
+  renderPreviewPoze();
 }
 
 function init() {
