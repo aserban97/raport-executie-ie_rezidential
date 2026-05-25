@@ -11,6 +11,7 @@ const MATERIALE_DEFAULT = [
   { id: 'cyyf15', nume: 'CYYF 3x1.5', um: 'm' },
   { id: 'cyyf25', nume: 'CYYF 3x2.5', um: 'm' },
   { id: 'cyyf4', nume: 'CYYF 3x4', um: 'm' },
+  { id: 'cablu_4x15', nume: 'Cablu 4x1.5mmp', um: 'm' },
 ];
 
 let state = {
@@ -34,6 +35,12 @@ function load() {
     }
   } catch (e) { console.error('Load error', e); }
   if (!state.materiale || state.materiale.length === 0) state.materiale = [...MATERIALE_DEFAULT];
+  // Migrare: adaugă materiale default lipsă (pentru utilizatori existenți)
+  MATERIALE_DEFAULT.forEach(def => {
+    if (!state.materiale.some(m => m.id === def.id)) {
+      state.materiale.push({ ...def });
+    }
+  });
 }
 function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
