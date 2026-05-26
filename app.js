@@ -316,6 +316,7 @@ function genereazaPDF(r) {
     <div><b>Șantier:</b> ${santier}</div>
     <div><b>Persoane pe șantier:</b> ${r.nrPersoane}</div>
     <div><b>din care electricieni:</b> ${r.nrElectricieni || 0}</div>
+    <div><b>Responsabil raport:</b> ${r.utilizator || '—'}</div>
   </div>
 
   <h2>Apartamente / zone lucrate azi</h2>
@@ -536,14 +537,13 @@ function renderKPI() {
       if (!perTip[ap.tip]) perTip[ap.tip] = { aps: new Set(), mat: {} };
       perTip[ap.tip].aps.add(ap.cod);
     });
-    // distribuim materialele proporțional la alocări (aproximare)
-    const alocAps = r.alocari.map(a => state.apartamente.find(x => x.cod === a.ap)).filter(Boolean);
-    if (alocAps.length === 0) return;
-    Object.entries(r.materiale || {}).forEach(([k, v]) => {
-      const perAp = v / alocAps.length;
-      alocAps.forEach(ap => {
+    // FIX: folosim materialele reale per alocare, NU distribuție egală
+    r.alocari.forEach(a => {
+      const ap = state.apartamente.find(x => x.cod === a.ap);
+      if (!ap) return;
+      Object.entries(a.materiale || {}).forEach(([k, v]) => {
         if (!perTip[ap.tip].mat[k]) perTip[ap.tip].mat[k] = 0;
-        perTip[ap.tip].mat[k] += perAp;
+        perTip[ap.tip].mat[k] += v;
       });
     });
   });
@@ -1203,6 +1203,199 @@ function renderChartDevieri() {
   }, 100);
 }
 
+// ============= DONUT DISTRIBUȚIE MATERIALE PER TIP =============
+function renderDonutMaterialeTip() {
+  const cont = document.getElementById('donutMaterialeTip');
+  if (!cont) return;
+
+  // grupare materiale per tip apartament (cantități reale)
+  const perTip = {};
+  state.rapoarte.forEach(r => {
+    r.alocari.forEach(a => {
+      const ap = state.apartamente.find(x => x.cod === a.ap);
+      if (!ap) return;
+      if (!perTip[ap.tip]) perTip[ap.tip] = {};
+      Object.entries(a.materiale || {}).forEach(([k, v]) => {
+        perTip[ap.tip][k] = (perTip[ap.tip][k] || 0) + v;
+      });
+    });
+  });
+
+  if (Object.keys(perTip).length === 0) {
+    cont.innerHTML = '<div class="empty">Niciun raport încă cu apartamente create</div>';
+    return;
+  }
+
+  const colors = ['#1e40af', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
+
+  let html = '<div style="display:flex;flex-wrap:wrap;gap:20px;justify-content:center">';
+  Object.entries(perTip).forEach(([tip, mats]) => {
+    const total = Object.values(mats).reduce((s, v) => s + v, 0);
+    if (total === 0) return;
+    const r = 60, cx = 80, cy = 80;
+    let offset = -Math.PI / 2;
+    let segments = '';
+    const legend = [];
+    Object.entries(mats).forEach(([matId, val], i) => {
+      const m = state.materiale.find(x => x.id === matId);
+      if (!m || val === 0) return;
+      const pct = val / total;
+      const arc = pct * 2 * Math.PI;
+      const x1 = cx + r * Math.cos(offset);
+      const y1 = cy + r * Math.sin(offset);
+      const x2 = cx + r * Math.cos(offset + arc);
+      const y2 = cy + r * Math.sin(offset + arc);
+      const large = arc > Math.PI ? 1 : 0;
+      const color = colors[i % colors.length];
+      segments += `<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z" fill="${color}" stroke="white" stroke-width="2" />`;
+      legend.push(`<div class="donut-legend-item"><div class="donut-legend-color" style="background:${color}"></div>${m.nume}: ${val.toFixed(0)}${m.um} (${(pct * 100).toFixed(0)}%)</div>`);
+      offset += arc;
+    });
+
+    html += `<div style="text-align:center;min-width:220px">
+      <div style="font-weight:600;color:#1e40af;margin-bottom:6px">${tip}</div>
+      <svg width="160" height="160" viewBox="0 0 160 160">${segments}<circle cx="80" cy="80" r="30" fill="white" /></svg>
+      <div class="donut-legend" style="margin-left:0;font-size:11px;text-align:left">${legend.join('')}</div>
+    </div>`;
+  });
+  html += '</div>';
+  cont.innerHTML = html;
+}
+
+// ============= DURATĂ MEDIE EXECUȚIE PER TIP =============
+function calculeazaDurateApartamente() {
+  // Pentru fiecare apartament: când a fost prima dată "în lucru" și prima dată "gata"
+  const istoric = {}; // cod -> [{ data, stare }]
+  state.rapoarte.slice().sort((a, b) => a.data.localeCompare(b.data)).forEach(r => {
+    r.alocari.forEach(a => {
+      if (!a.stareNoua) return;
+      if (!istoric[a.ap]) istoric[a.ap] = [];
+      istoric[a.ap].push({ data: r.data, stare: a.stareNoua });
+    });
+  });
+
+  const durate = {}; // cod -> { tip, zile }
+  Object.entries(istoric).forEach(([cod, evenimente]) => {
+    const ap = state.apartamente.find(x => x.cod === cod);
+    if (!ap || ap.stare !== 'gata') return; // doar apartamente "Gata"
+    const start = evenimente.find(e => e.stare === 'in_lucru');
+    const end = evenimente.slice().reverse().find(e => e.stare === 'gata');
+    if (!start || !end) return;
+    const d1 = new Date(start.data), d2 = new Date(end.data);
+    const zile = Math.max(1, Math.round((d2 - d1) / 86400000) + 1);
+    durate[cod] = { tip: ap.tip, zile };
+  });
+  return durate;
+}
+
+function renderDurataPerTip() {
+  const cont = document.getElementById('durataPerTip');
+  if (!cont) return;
+  const durate = calculeazaDurateApartamente();
+  const perTip = {};
+  Object.values(durate).forEach(d => {
+    if (!perTip[d.tip]) perTip[d.tip] = [];
+    perTip[d.tip].push(d.zile);
+  });
+
+  if (Object.keys(perTip).length === 0) {
+    cont.innerHTML = '<div class="empty">Niciun apartament finalizat încă (marchează "Gata" în Apartamente)</div>';
+    return;
+  }
+
+  const maxMedia = Math.max(...Object.values(perTip).map(zile => zile.reduce((a, b) => a + b, 0) / zile.length), 1);
+
+  let html = '<div class="bar-chart">';
+  TIPURI_AP.forEach(tip => {
+    if (!perTip[tip]) return;
+    const zile = perTip[tip];
+    const media = zile.reduce((a, b) => a + b, 0) / zile.length;
+    const pct = (media / maxMedia) * 100;
+    html += `<div class="bar-row">
+      <div class="label">${tip}</div>
+      <div class="bar-container"><div class="bar-fill" style="width:0%;background:#10b981">${media.toFixed(1)} zile (${zile.length} ap)</div></div>
+    </div>`;
+  });
+  html += '</div>';
+  cont.innerHTML = html;
+
+  setTimeout(() => {
+    const fills = cont.querySelectorAll('.bar-fill');
+    let idx = 0;
+    TIPURI_AP.forEach(tip => {
+      if (!perTip[tip]) return;
+      const zile = perTip[tip];
+      const media = zile.reduce((a, b) => a + b, 0) / zile.length;
+      fills[idx].style.width = ((media / maxMedia) * 100) + '%';
+      idx++;
+    });
+  }, 100);
+}
+
+// ============= PREDICȚIE PROIECT =============
+function renderPredictieProiect() {
+  const cont = document.getElementById('predictieProiect');
+  if (!cont) return;
+  const durate = calculeazaDurateApartamente();
+  const perTip = {};
+  Object.values(durate).forEach(d => {
+    if (!perTip[d.tip]) perTip[d.tip] = [];
+    perTip[d.tip].push(d.zile);
+  });
+
+  // Apartamente rămase (neînceput + în lucru)
+  const ramaseTip = {};
+  state.apartamente.forEach(ap => {
+    if (ap.stare !== 'gata') {
+      ramaseTip[ap.tip] = (ramaseTip[ap.tip] || 0) + 1;
+    }
+  });
+
+  if (Object.keys(ramaseTip).length === 0) {
+    cont.innerHTML = '<div class="empty">Niciun apartament în execuție</div>';
+    return;
+  }
+  if (Object.keys(perTip).length === 0) {
+    cont.innerHTML = '<div class="empty">Marchează măcar 1 apartament "Gata" ca să pot estima</div>';
+    return;
+  }
+
+  // Calcul ritm: media om-zile/apartament terminat, raport la electricieni medii pe șantier
+  const totalElZile = state.rapoarte.reduce((s, r) => s + (r.nrElectricieni || 0), 0);
+  const totalApFinalizate = Object.keys(durate).length;
+  const omZilePerAp = totalElZile / (totalApFinalizate || 1);
+  const electricieniMedii = state.rapoarte.length ? totalElZile / state.rapoarte.length : 1;
+
+  let zileRamase = 0;
+  let detaliuRows = '';
+  Object.entries(ramaseTip).forEach(([tip, n]) => {
+    const mediaTipo = perTip[tip] ? perTip[tip].reduce((a, b) => a + b, 0) / perTip[tip].length : null;
+    const mediaGlobala = Object.values(durate).reduce((a, b) => a + b.zile, 0) / totalApFinalizate;
+    const media = mediaTipo || mediaGlobala;
+    const zile = n * media;
+    zileRamase += zile;
+    detaliuRows += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;border-bottom:1px solid #f3f4f6"><span>${tip} × ${n} ap</span><span style="font-weight:600">${zile.toFixed(0)} zile-apartament</span></div>`;
+  });
+
+  // ajustare: dacă lucrăm pe mai multe apartamente simultan
+  const apartParalele = Math.max(1, Math.round(electricieniMedii / 2)); // 2 electricieni/apartament estimat
+  const zileCalendaristice = Math.ceil(zileRamase / apartParalele);
+  const luniCalendaristice = (zileCalendaristice / 22).toFixed(1); // 22 zile lucratoare/luna
+
+  cont.innerHTML = `
+    <div style="text-align:center;padding:14px 0">
+      <div class="big-stat" style="font-size:36px;font-weight:700;color:#1e40af">${zileCalendaristice} zile</div>
+      <div style="font-size:13px;color:#6b7280;margin-top:4px">≈ ${luniCalendaristice} luni lucrătoare</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:6px">la ritmul actual de ~${electricieniMedii.toFixed(1)} electricieni/zi pe ${apartParalele} ap. în paralel</div>
+    </div>
+    <details style="margin-top:10px">
+      <summary>Detaliu calcul</summary>
+      ${detaliuRows}
+      <div style="font-size:11px;color:#9ca3af;margin-top:8px">Estimarea se calibrează automat pe măsură ce marchezi apartamente "Gata".</div>
+    </details>
+  `;
+}
+
 // Hook în renderKPI
 const _renderKPI_original = renderKPI;
 renderKPI = function () {
@@ -1211,6 +1404,9 @@ renderKPI = function () {
   renderDonut();
   renderChartConsum7();
   renderChartDevieri();
+  renderDonutMaterialeTip();
+  renderDurataPerTip();
+  renderPredictieProiect();
 };
 
 function init() {
