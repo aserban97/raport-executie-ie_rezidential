@@ -1396,12 +1396,83 @@ function renderPredictieProiect() {
   `;
 }
 
+// ============= PRODUCTIVITATE PER ELECTRICIAN-ZI =============
+function renderProductivitate() {
+  const cont = document.getElementById('productivitateGrid');
+  if (!cont) return;
+  if (state.rapoarte.length === 0) {
+    cont.innerHTML = '<div class="empty">Niciun raport încă</div>';
+    return;
+  }
+
+  // Calcul global (toată perioada)
+  const totalGlobal = {};
+  let elZileGlobal = 0;
+  state.rapoarte.forEach(r => {
+    elZileGlobal += r.nrElectricieni || 0;
+    Object.entries(r.materiale || {}).forEach(([k, v]) => {
+      totalGlobal[k] = (totalGlobal[k] || 0) + v;
+    });
+  });
+
+  // Calcul recent (ultimele 7 zile calendaristice de la ultima zi raportată)
+  const dateRapoarte = state.rapoarte.map(r => r.data).sort();
+  const ultimaZi = dateRapoarte[dateRapoarte.length - 1];
+  const d7 = new Date(ultimaZi); d7.setDate(d7.getDate() - 6);
+  const start7 = d7.toISOString().slice(0, 10);
+
+  const totalRecent = {};
+  let elZileRecent = 0;
+  state.rapoarte.filter(r => r.data >= start7).forEach(r => {
+    elZileRecent += r.nrElectricieni || 0;
+    Object.entries(r.materiale || {}).forEach(([k, v]) => {
+      totalRecent[k] = (totalRecent[k] || 0) + v;
+    });
+  });
+
+  // Construim cardurile (doar materialele cu consum)
+  let html = '<div class="prod-grid">';
+  let nCarduri = 0;
+  state.materiale.forEach(m => {
+    const totG = totalGlobal[m.id] || 0;
+    const totR = totalRecent[m.id] || 0;
+    if (totG === 0) return;
+    const mediaG = elZileGlobal ? totG / elZileGlobal : 0;
+    const mediaR = elZileRecent ? totR / elZileRecent : 0;
+    // trend %
+    let trendCls = 'eq', trendArrow = '→', trendVal = '';
+    if (mediaG > 0 && mediaR > 0) {
+      const diff = ((mediaR - mediaG) / mediaG) * 100;
+      if (Math.abs(diff) < 5) { trendCls = 'eq'; trendArrow = '→'; trendVal = `${diff > 0 ? '+' : ''}${diff.toFixed(0)}%`; }
+      else if (diff > 0) { trendCls = 'up'; trendArrow = '↑'; trendVal = `+${diff.toFixed(0)}%`; }
+      else { trendCls = 'down'; trendArrow = '↓'; trendVal = `${diff.toFixed(0)}%`; }
+    }
+    html += `<div class="prod-card">
+      <div class="nume">${m.nume}</div>
+      <div><span class="val-mare">${mediaG.toFixed(1)}</span><span class="um">${m.um}/el/zi</span></div>
+      <div class="recent">
+        <span>Ultimele 7 zile: ${mediaR.toFixed(1)} ${m.um}</span>
+        <span class="trend ${trendCls}">${trendArrow} ${trendVal}</span>
+      </div>
+    </div>`;
+    nCarduri++;
+  });
+  html += '</div>';
+
+  if (nCarduri === 0) {
+    cont.innerHTML = '<div class="empty">Niciun consum încă</div>';
+  } else {
+    cont.innerHTML = html;
+  }
+}
+
 // Hook în renderKPI
 const _renderKPI_original = renderKPI;
 renderKPI = function () {
   _renderKPI_original();
   renderProgresBar();
   renderDonut();
+  renderProductivitate();
   renderChartConsum7();
   renderChartDevieri();
   renderDonutMaterialeTip();
