@@ -20,8 +20,10 @@
   </header>
 
   <nav class="tabs">
-    <button class="tab active" data-tab="raport">Raport zilnic</button>
-    <button class="tab" data-tab="apartamente">Apartamente</button>
+    <button class="tab active" data-tab="raport">Raport</button>
+    <button class="tab" data-tab="calendar">Istoric</button>
+    <button class="tab" data-tab="apartamente">Apart.</button>
+    <button class="tab" data-tab="stoc">Stoc</button>
     <button class="tab" data-tab="kpi">KPI</button>
     <button class="tab" data-tab="setari">Setări</button>
   </nav>
@@ -91,6 +93,25 @@
 
       <h3>Rapoarte salvate</h3>
       <div id="listaRapoarte" class="card"></div>
+    </section>
+
+    <!-- TAB: CALENDAR / ISTORIC -->
+    <section id="tab-calendar" class="tab-panel">
+      <h2>Istoric rapoarte</h2>
+      <div class="card">
+        <div class="row">
+          <label>
+            Lună
+            <input type="month" id="filtruLuna" />
+          </label>
+          <label>&nbsp;
+            <button type="button" class="btn-secondary" id="btnDescarcaSaptamana">📅 Descarcă PDF săptămâna curentă</button>
+          </label>
+        </div>
+        <div id="calendarGrid" class="calendar-grid"></div>
+      </div>
+      <h3>Toate rapoartele</h3>
+      <div id="listaIstoric" class="card"></div>
     </section>
 
     <!-- TAB: APARTAMENTE -->
@@ -171,14 +192,62 @@
         </div>
         <button type="button" class="btn-secondary" id="btnBulk">Generează</button>
       </details>
+
+      <h3>Norme consum per tip apartament (pentru KPI)</h3>
+      <div class="card">
+        <p class="small">Introdu cantitatea estimată de material pentru fiecare tip. Folosite la calculul devierilor în KPI. NU apar în PDF antreprenor.</p>
+        <div id="normeContainer"></div>
+      </div>
+    </section>
+
+    <!-- TAB: STOC -->
+    <section id="tab-stoc" class="tab-panel">
+      <h2>Stoc materiale</h2>
+      <div class="card">
+        <h3>Adaugă aprovizionare</h3>
+        <div id="aprovizionareInputs"></div>
+        <label>
+          Notă (opțional)
+          <input type="text" id="aproNota" placeholder="ex: factura 1234, livrat 24.05" />
+        </label>
+        <button type="button" class="btn-primary" id="btnAdaugaApro">+ Salvează aprovizionare</button>
+      </div>
+
+      <h3>Stoc curent</h3>
+      <div id="stocCurent" class="card"></div>
+
+      <h3>Istoric mișcări</h3>
+      <div id="istoricMiscari" class="card"></div>
     </section>
 
     <!-- TAB: KPI -->
     <section id="tab-kpi" class="tab-panel">
       <h2>KPI Dashboard</h2>
       <div id="kpiCards" class="kpi-grid"></div>
+
+      <h3>📊 Progres proiect</h3>
+      <div class="card">
+        <div id="progresBar"></div>
+      </div>
+
+      <h3>🍩 Stare apartamente</h3>
+      <div class="card">
+        <div id="donutStare" class="chart-wrap"></div>
+      </div>
+
+      <h3>📈 Consum material - ultimele 7 zile</h3>
+      <div class="card">
+        <div id="chartConsum7"></div>
+      </div>
+
+      <h3>📊 Devieri vs norme (per tip)</h3>
+      <div class="card">
+        <div id="chartDevieri"></div>
+      </div>
+
       <h3>Consum mediu material / apartament (după tip)</h3>
       <div id="kpiPerTip" class="card"></div>
+
       <h3>Trend ultimele 7 zile</h3>
       <div id="kpiTrend" class="card"></div>
     </section>
@@ -221,6 +290,15 @@
           </label>
         </div>
         <button type="button" class="btn-primary" id="btnSaveProiect">Salvează</button>
+      </div>
+
+      <div class="card">
+        <h3>Rapoarte arhivă (doar pentru tine)</h3>
+        <div class="actions">
+          <button type="button" class="btn-primary" id="btnRapSaptamana">📅 PDF săptămâna curentă</button>
+          <button type="button" class="btn-secondary" id="btnRapLuna">🗓️ PDF luna curentă</button>
+        </div>
+        <p class="small">Aceste rapoarte sunt pentru evidența firmei, nu pentru antreprenor.</p>
       </div>
 
       <div class="card">

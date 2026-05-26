@@ -21,6 +21,8 @@ let state = {
   utilizator: '',
   antreprenor: 'KESZ',
   santier: 'Corallis',
+  norme: {}, // { '2 camere': { tub20: 80, cyyf25: 150 }, '3 camere': {...} }
+  aprovizionari: [], // [{ id, data, materiale: {tub20: 500, ...}, nota }]
 };
 
 let pozeCurente = []; // {dataUrl, name} pentru raportul în lucru
@@ -66,7 +68,9 @@ document.querySelectorAll('.tab').forEach(btn => {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-    if (btn.dataset.tab === 'apartamente') renderApartamente();
+    if (btn.dataset.tab === 'apartamente') { renderApartamente(); renderNorme(); }
+    if (btn.dataset.tab === 'calendar') renderCalendar();
+    if (btn.dataset.tab === 'stoc') renderStoc();
     if (btn.dataset.tab === 'kpi') renderKPI();
     if (btn.dataset.tab === 'setari') renderSetari();
   });
@@ -689,6 +693,525 @@ function renderAll() {
   renderUserBadge();
   renderPreviewPoze();
 }
+
+// ============= NORME =============
+const TIPURI_AP = ['2 camere', '3 camere', '4 camere', 'Penthouse', 'Zona comuna'];
+
+function renderNorme() {
+  const cont = document.getElementById('normeContainer');
+  if (!cont) return;
+  cont.innerHTML = '';
+  TIPURI_AP.forEach(tip => {
+    const block = document.createElement('div');
+    block.style.cssText = 'background:#f9fafb;padding:10px;border-radius:6px;margin-bottom:8px';
+    const matInputs = state.materiale.map(m => {
+      const val = (state.norme[tip] && state.norme[tip][m.id]) || '';
+      return `<div class="alocare-mat-item">
+        <label>${m.nume}</label>
+        <div class="mat-input">
+          <input type="number" class="norma-qty" data-tip="${tip}" data-mat="${m.id}" min="0" step="0.1" value="${val}" placeholder="0" />
+          <span class="um-small">${m.um}</span>
+        </div>
+      </div>`;
+    }).join('');
+    block.innerHTML = `<div style="font-weight:600;margin-bottom:6px;color:#1e40af">${tip}</div><div class="alocare-materiale">${matInputs}</div>`;
+    cont.appendChild(block);
+  });
+  // auto-save on change
+  cont.querySelectorAll('.norma-qty').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const tip = inp.dataset.tip, mat = inp.dataset.mat;
+      if (!state.norme[tip]) state.norme[tip] = {};
+      const v = parseFloat(inp.value);
+      if (v > 0) state.norme[tip][mat] = v;
+      else delete state.norme[tip][mat];
+      save();
+      toast('Normă salvată ✓');
+    });
+  });
+}
+
+// ============= STOC =============
+function renderStoc() {
+  // Inputs aprovizionare
+  const cont = document.getElementById('aprovizionareInputs');
+  cont.innerHTML = '';
+  state.materiale.forEach(m => {
+    const row = document.createElement('div');
+    row.className = 'apro-row';
+    row.innerHTML = `
+      <span class="nume">${m.nume}</span>
+      <input type="number" class="apro-qty" data-mat="${m.id}" min="0" step="0.1" placeholder="0" />
+      <span class="um">${m.um}</span>
+    `;
+    cont.appendChild(row);
+  });
+
+  // Stoc curent
+  const stocCont = document.getElementById('stocCurent');
+  const consum = calculeazaConsumTotal();
+  const aprovizionat = calculeazaAprovizionatTotal();
+  stocCont.innerHTML = '';
+  state.materiale.forEach(m => {
+    const intrari = aprovizionat[m.id] || 0;
+    const iesiri = consum[m.id] || 0;
+    const stoc = intrari - iesiri;
+    const cls = stoc <= 0 ? 'zero' : (stoc < 50 ? 'low' : '');
+    const row = document.createElement('div');
+    row.className = 'stoc-item ' + cls;
+    row.innerHTML = `
+      <div>
+        <div class="stoc-nume">${m.nume}</div>
+        <div class="stoc-detail">Aprovizionat: ${intrari.toFixed(1)} ${m.um} • Consumat: ${iesiri.toFixed(1)} ${m.um}</div>
+      </div>
+      <div class="stoc-val">${stoc.toFixed(1)} ${m.um}</div>
+    `;
+    stocCont.appendChild(row);
+  });
+
+  // Istoric mișcări
+  const istCont = document.getElementById('istoricMiscari');
+  if (state.aprovizionari.length === 0) {
+    istCont.innerHTML = '<div class="empty">Nicio aprovizionare încă</div>';
+  } else {
+    istCont.innerHTML = '';
+    state.aprovizionari.slice().reverse().forEach(a => {
+      const item = document.createElement('div');
+      item.className = 'raport-item';
+      const matLista = Object.entries(a.materiale).map(([k, v]) => {
+        const m = state.materiale.find(x => x.id === k);
+        return m ? `${m.nume}: +${v}${m.um}` : '';
+      }).filter(Boolean).join(' • ');
+      item.innerHTML = `
+        <div class="head">
+          <strong>${fmtDate(a.data)}</strong>
+          <button class="btn-del" data-del="${a.id}">×</button>
+        </div>
+        <div class="info">${matLista}</div>
+        ${a.nota ? `<div class="info"><b>Notă:</b> ${a.nota}</div>` : ''}
+      `;
+      item.querySelector('[data-del]').addEventListener('click', () => {
+        if (!confirm('Ștergi aprovizionarea?')) return;
+        state.aprovizionari = state.aprovizionari.filter(x => x.id !== a.id);
+        save(); renderStoc();
+      });
+      istCont.appendChild(item);
+    });
+  }
+}
+
+function calculeazaConsumTotal() {
+  const total = {};
+  state.rapoarte.forEach(r => {
+    Object.entries(r.materiale || {}).forEach(([k, v]) => {
+      total[k] = (total[k] || 0) + v;
+    });
+  });
+  return total;
+}
+
+function calculeazaAprovizionatTotal() {
+  const total = {};
+  state.aprovizionari.forEach(a => {
+    Object.entries(a.materiale || {}).forEach(([k, v]) => {
+      total[k] = (total[k] || 0) + v;
+    });
+  });
+  return total;
+}
+
+document.getElementById('btnAdaugaApro').addEventListener('click', () => {
+  const materiale = {};
+  document.querySelectorAll('.apro-qty').forEach(inp => {
+    const v = parseFloat(inp.value);
+    if (v > 0) materiale[inp.dataset.mat] = v;
+  });
+  if (Object.keys(materiale).length === 0) { toast('Adaugă cel puțin un material'); return; }
+  const nota = document.getElementById('aproNota').value.trim();
+  state.aprovizionari.push({
+    id: uid(), data: todayISO(), materiale, nota,
+    createdAt: new Date().toISOString(),
+  });
+  document.getElementById('aproNota').value = '';
+  document.querySelectorAll('.apro-qty').forEach(i => i.value = '');
+  save(); renderStoc();
+  toast('Aprovizionare salvată ✓');
+});
+
+// ============= CALENDAR =============
+function renderCalendar() {
+  const filtruLuna = document.getElementById('filtruLuna');
+  if (!filtruLuna.value) {
+    const d = new Date();
+    filtruLuna.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+  const [an, luna] = filtruLuna.value.split('-').map(Number);
+  const primaZi = new Date(an, luna - 1, 1);
+  const ultimaZi = new Date(an, luna, 0);
+  const zileInLuna = ultimaZi.getDate();
+  let primaZiSapt = primaZi.getDay(); // 0=duminică
+  primaZiSapt = primaZiSapt === 0 ? 6 : primaZiSapt - 1; // 0=luni
+
+  const cont = document.getElementById('calendarGrid');
+  cont.innerHTML = '';
+
+  // Header zile săptămână
+  const header = document.createElement('div');
+  header.className = 'calendar-header';
+  ['L', 'M', 'M', 'J', 'V', 'S', 'D'].forEach(z => {
+    const d = document.createElement('div');
+    d.textContent = z;
+    header.appendChild(d);
+  });
+  cont.parentNode.insertBefore(header, cont);
+  // remove duplicate headers
+  cont.parentNode.querySelectorAll('.calendar-header').forEach((h, i, arr) => {
+    if (i < arr.length - 1) h.remove();
+  });
+
+  // Spații goale înainte de ziua 1
+  for (let i = 0; i < primaZiSapt; i++) {
+    const empty = document.createElement('div');
+    cont.appendChild(empty);
+  }
+
+  // Zilele
+  for (let zi = 1; zi <= zileInLuna; zi++) {
+    const isoData = `${an}-${String(luna).padStart(2, '0')}-${String(zi).padStart(2, '0')}`;
+    const rapoarteZi = state.rapoarte.filter(r => r.data === isoData);
+    const cell = document.createElement('div');
+    const dayDate = new Date(an, luna - 1, zi);
+    const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
+    cell.className = 'calendar-day' + (rapoarteZi.length ? ' has-raport' : '') + (isWeekend ? ' weekend' : '');
+    cell.innerHTML = `<div class="num">${zi}</div>${rapoarteZi.length ? `<div class="marker">${rapoarteZi.length} raport${rapoarteZi.length > 1 ? 'e' : ''}</div>` : ''}`;
+    if (rapoarteZi.length > 0) {
+      cell.addEventListener('click', () => {
+        // generează PDF pentru prima zi (sau combinat dacă sunt mai multe)
+        if (rapoarteZi.length === 1) genereazaPDF(rapoarteZi[0]);
+        else {
+          if (confirm(`${rapoarteZi.length} rapoarte în ${fmtDate(isoData)}. Generez PDF combinat?`)) {
+            genereazaPDFInterval(isoData, isoData, `Raport ${fmtDate(isoData)}`);
+          }
+        }
+      });
+    }
+    cont.appendChild(cell);
+  }
+
+  // Lista istoric textuală
+  const ist = document.getElementById('listaIstoric');
+  if (state.rapoarte.length === 0) {
+    ist.innerHTML = '<div class="empty">Niciun raport încă</div>';
+    return;
+  }
+  ist.innerHTML = '';
+  state.rapoarte.slice().sort((a, b) => b.data.localeCompare(a.data)).forEach(r => {
+    const item = document.createElement('div');
+    item.className = 'raport-item';
+    const apartLista = r.alocari.map(a => a.ap).join(', ');
+    item.innerHTML = `
+      <div class="head">
+        <strong>${fmtDate(r.data)}</strong>
+        <button class="btn-secondary" data-pdf="${r.id}" style="padding:4px 10px;font-size:12px">PDF</button>
+      </div>
+      <div class="info">${apartLista} • ${r.nrPersoane}p (${r.nrElectricieni || 0}el)</div>
+    `;
+    item.querySelector('[data-pdf]').addEventListener('click', () => genereazaPDF(r));
+    ist.appendChild(item);
+  });
+}
+
+document.getElementById('filtruLuna').addEventListener('change', renderCalendar);
+
+document.getElementById('btnDescarcaSaptamana').addEventListener('click', () => {
+  const { start, end } = saptamanaCurenta();
+  genereazaPDFInterval(start, end, `Săptămâna ${fmtDate(start)} — ${fmtDate(end)}`);
+});
+
+function saptamanaCurenta() {
+  const azi = new Date();
+  const ziSapt = azi.getDay() === 0 ? 6 : azi.getDay() - 1; // 0=luni
+  const luni = new Date(azi); luni.setDate(azi.getDate() - ziSapt);
+  const duminica = new Date(luni); duminica.setDate(luni.getDate() + 6);
+  const fmt = d => d.toISOString().slice(0, 10);
+  return { start: fmt(luni), end: fmt(duminica) };
+}
+
+function lunaCurenta() {
+  const azi = new Date();
+  const start = new Date(azi.getFullYear(), azi.getMonth(), 1).toISOString().slice(0, 10);
+  const end = new Date(azi.getFullYear(), azi.getMonth() + 1, 0).toISOString().slice(0, 10);
+  return { start, end };
+}
+
+// ============= PDF INTERVAL (săptămânal / lunar) =============
+function genereazaPDFInterval(startISO, endISO, titlu) {
+  const rapoarte = state.rapoarte
+    .filter(r => r.data >= startISO && r.data <= endISO)
+    .sort((a, b) => a.data.localeCompare(b.data));
+
+  if (rapoarte.length === 0) { toast('Niciun raport în interval'); return; }
+
+  // Calculează totaluri
+  const totalMat = {};
+  let totalOameni = 0, totalElectricieni = 0;
+  const aps = new Set();
+  rapoarte.forEach(r => {
+    Object.entries(r.materiale || {}).forEach(([k, v]) => { totalMat[k] = (totalMat[k] || 0) + v; });
+    totalOameni += r.nrPersoane || 0;
+    totalElectricieni += r.nrElectricieni || 0;
+    r.alocari.forEach(a => aps.add(a.ap));
+  });
+
+  const totalRows = Object.entries(totalMat).map(([k, v]) => {
+    const m = state.materiale.find(x => x.id === k);
+    return m ? `<tr><td>${m.nume}</td><td style="text-align:right">${v.toFixed(1)} ${m.um}</td></tr>` : '';
+  }).join('');
+
+  const zilePages = rapoarte.map(r => {
+    const apList = r.alocari.map(a => `${a.ap} (${a.oameni || '—'} oameni, ${{in_lucru:'În lucru',gata:'Gata',blocat:'Blocat'}[a.stareNoua] || '—'})`).join('<br>');
+    const matRows = Object.entries(r.materiale || {}).map(([k, v]) => {
+      const m = state.materiale.find(x => x.id === k);
+      return m ? `<tr><td>${m.nume}</td><td style="text-align:right">${v.toFixed(1)} ${m.um}</td></tr>` : '';
+    }).join('');
+    return `
+<div class="page">
+  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">iFort Systems S.R.L.</div><div class="sub">Detaliu zi — ${fmtDate(r.data)}</div></div></div>
+  <div class="info-grid">
+    <div><b>Data:</b> ${fmtDate(r.data)}</div>
+    <div><b>Program:</b> ${r.oraStart}—${r.oraFinal}</div>
+    <div><b>Persoane:</b> ${r.nrPersoane} (${r.nrElectricieni || 0} el.)</div>
+    <div><b>Apartamente:</b> ${r.alocari.length}</div>
+  </div>
+  <h2>Apartamente lucrate</h2>
+  <p>${apList}</p>
+  <h2>Materiale</h2>
+  <table><thead><tr><th>Material</th><th style="text-align:right">Cantitate</th></tr></thead><tbody>${matRows || '<tr><td colspan="2" style="text-align:center">—</td></tr>'}</tbody></table>
+</div>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${titlu}</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
+.page{background:white;padding:30px;max-width:780px;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1);page-break-after:always}
+.page:last-child{page-break-after:auto}
+.header{display:flex;align-items:center;gap:18px;border-bottom:3px solid #1e40af;padding-bottom:12px;margin-bottom:18px}
+.header .logo{width:80px;height:auto}.header-text .company{font-size:22px;font-weight:700;color:#1e40af}.header-text .sub{font-size:13px;color:#6b7280}
+h2{font-size:15px;color:#374151;margin-top:22px;margin-bottom:8px;border-bottom:1px solid #e5e7eb;padding-bottom:4px}
+table{width:100%;border-collapse:collapse}td,th{padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:14px}th{background:#f3f4f6;text-align:left}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:#f9fafb;padding:14px;border-radius:8px;margin-bottom:12px}
+.info-grid b{color:#1e40af}.big-stat{font-size:36px;font-weight:700;color:#1e40af}
+.no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;z-index:1000}
+@media print{body{background:white}.page{margin:0;box-shadow:none}.no-print{display:none}}
+</style></head><body>
+<button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
+<div class="page">
+  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">iFort Systems S.R.L.</div><div class="sub">${titlu} — Arhivă firmă</div></div></div>
+  <div class="info-grid">
+    <div><b>Interval:</b> ${fmtDate(startISO)} — ${fmtDate(endISO)}</div>
+    <div><b>Șantier:</b> ${state.santier}</div>
+    <div><b>Zile lucrate:</b> ${rapoarte.length}</div>
+    <div><b>Apartamente unice:</b> ${aps.size}</div>
+    <div><b>Total persoane-zile:</b> ${totalOameni}</div>
+    <div><b>Total electricieni-zile:</b> ${totalElectricieni}</div>
+  </div>
+  <h2>TOTAL materiale consumate în interval</h2>
+  <table><thead><tr><th>Material</th><th style="text-align:right">Total</th></tr></thead><tbody>${totalRows}</tbody></table>
+  <h2>Apartamente lucrate</h2>
+  <p>${[...aps].join(', ')}</p>
+  <div style="margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center">Document generat — iFort Systems S.R.L.</div>
+</div>
+${zilePages}
+</body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(html); w.document.close();
+}
+
+document.getElementById('btnRapSaptamana').addEventListener('click', () => {
+  const { start, end } = saptamanaCurenta();
+  genereazaPDFInterval(start, end, `Săptămâna ${fmtDate(start)} — ${fmtDate(end)}`);
+});
+document.getElementById('btnRapLuna').addEventListener('click', () => {
+  const { start, end } = lunaCurenta();
+  genereazaPDFInterval(start, end, `Luna ${fmtDate(start).slice(3)}`);
+});
+
+// ============= KPI EXTINS - GRAFICE =============
+function renderProgresBar() {
+  const cont = document.getElementById('progresBar');
+  if (!cont) return;
+  const total = state.apartamente.length;
+  const gata = state.apartamente.filter(a => a.stare === 'gata').length;
+  const inLucru = state.apartamente.filter(a => a.stare === 'in_lucru').length;
+  const procentGata = total ? (gata / total * 100) : 0;
+  cont.innerHTML = `
+    <div class="progres-info">
+      <span>${gata} terminate / ${total} total</span>
+      <span>${inLucru} în lucru</span>
+    </div>
+    <div class="progres-bar-container">
+      <div class="progres-bar-fill" style="width:0%">${procentGata.toFixed(0)}%</div>
+    </div>
+  `;
+  setTimeout(() => {
+    cont.querySelector('.progres-bar-fill').style.width = procentGata + '%';
+  }, 100);
+}
+
+function renderDonut() {
+  const cont = document.getElementById('donutStare');
+  if (!cont) return;
+  const total = state.apartamente.length;
+  if (total === 0) { cont.innerHTML = '<div class="empty">Adaugă apartamente pentru a vedea diagrama</div>'; return; }
+  const stari = {
+    gata: { val: state.apartamente.filter(a => a.stare === 'gata').length, color: '#10b981', label: 'Gata' },
+    in_lucru: { val: state.apartamente.filter(a => a.stare === 'in_lucru').length, color: '#fbbf24', label: 'În lucru' },
+    blocat: { val: state.apartamente.filter(a => a.stare === 'blocat').length, color: '#ef4444', label: 'Blocat' },
+    neinceput: { val: state.apartamente.filter(a => !a.stare || a.stare === 'neinceput').length, color: '#d1d5db', label: 'Neînceput' },
+  };
+  const r = 70, cx = 100, cy = 100;
+  let offset = 0;
+  const segments = Object.values(stari).map(s => {
+    if (s.val === 0) return '';
+    const pct = s.val / total;
+    const arc = pct * 2 * Math.PI;
+    const x1 = cx + r * Math.cos(offset);
+    const y1 = cy + r * Math.sin(offset);
+    const x2 = cx + r * Math.cos(offset + arc);
+    const y2 = cy + r * Math.sin(offset + arc);
+    const large = arc > Math.PI ? 1 : 0;
+    const path = `M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z`;
+    offset += arc;
+    return `<path d="${path}" fill="${s.color}" stroke="white" stroke-width="2" />`;
+  }).join('');
+  const legend = Object.values(stari).filter(s => s.val > 0).map(s =>
+    `<div class="donut-legend-item"><div class="donut-legend-color" style="background:${s.color}"></div>${s.label}: ${s.val} (${(s.val / total * 100).toFixed(0)}%)</div>`
+  ).join('');
+  cont.innerHTML = `
+    <svg class="donut-svg" viewBox="0 0 200 200">
+      ${segments}
+      <circle cx="100" cy="100" r="40" fill="white" />
+      <text x="100" y="95" text-anchor="middle" font-size="22" font-weight="700" fill="#1e40af">${total}</text>
+      <text x="100" y="115" text-anchor="middle" font-size="11" fill="#6b7280">apart.</text>
+    </svg>
+    <div class="donut-legend">${legend}</div>
+  `;
+}
+
+function renderChartConsum7() {
+  const cont = document.getElementById('chartConsum7');
+  if (!cont) return;
+  const azi = new Date();
+  const zile = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(azi); d.setDate(azi.getDate() - i);
+    zile.push(d.toISOString().slice(0, 10));
+  }
+  // Top 3 materiale după consum total
+  const consumTotal = calculeazaConsumTotal();
+  const topMat = Object.entries(consumTotal).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  if (topMat.length === 0) { cont.innerHTML = '<div class="empty">Niciun consum încă</div>'; return; }
+
+  let html = '<div class="bar-chart">';
+  zile.forEach(d => {
+    const rapZi = state.rapoarte.filter(r => r.data === d);
+    topMat.forEach(([matId]) => {
+      const m = state.materiale.find(x => x.id === matId);
+      if (!m) return;
+      const val = rapZi.reduce((s, r) => s + (r.materiale?.[matId] || 0), 0);
+      // max pentru scalare
+      const maxVal = Math.max(...zile.map(z => {
+        const rz = state.rapoarte.filter(r => r.data === z);
+        return rz.reduce((s, r) => s + (r.materiale?.[matId] || 0), 0);
+      }));
+      const pct = maxVal ? (val / maxVal * 100) : 0;
+      const dayName = new Date(d).toLocaleDateString('ro-RO', { weekday: 'short', day: 'numeric' });
+      html += `<div class="bar-row"><div class="label">${dayName} - ${m.nume.slice(0, 12)}</div><div class="bar-container"><div class="bar-fill" style="width:0%">${val ? val.toFixed(0) + m.um : ''}</div></div></div>`;
+    });
+  });
+  html += '</div>';
+  cont.innerHTML = html;
+  // animate fills
+  setTimeout(() => {
+    const fills = cont.querySelectorAll('.bar-fill');
+    const rows = cont.querySelectorAll('.bar-row');
+    rows.forEach((row, i) => {
+      const labelText = row.querySelector('.label').textContent;
+      const matNume = labelText.split(' - ')[1];
+      const d = zile[Math.floor(i / topMat.length)];
+      const matIdx = i % topMat.length;
+      const matId = topMat[matIdx][0];
+      const val = state.rapoarte.filter(r => r.data === d).reduce((s, r) => s + (r.materiale?.[matId] || 0), 0);
+      const maxVal = Math.max(...zile.map(z => state.rapoarte.filter(r => r.data === z).reduce((s, r) => s + (r.materiale?.[matId] || 0), 0))) || 1;
+      fills[i].style.width = (val / maxVal * 100) + '%';
+    });
+  }, 100);
+}
+
+function renderChartDevieri() {
+  const cont = document.getElementById('chartDevieri');
+  if (!cont) return;
+  // Pentru fiecare tip apartament cu normă, compară cu media reală
+  const rows = [];
+  TIPURI_AP.forEach(tip => {
+    if (!state.norme[tip]) return;
+    const apsLogged = new Set();
+    const matReal = {};
+    state.rapoarte.forEach(r => {
+      r.alocari.forEach(a => {
+        const ap = state.apartamente.find(x => x.cod === a.ap);
+        if (ap && ap.tip === tip) {
+          apsLogged.add(ap.cod);
+          Object.entries(a.materiale || {}).forEach(([k, v]) => {
+            matReal[k] = (matReal[k] || 0) + v;
+          });
+        }
+      });
+    });
+    if (apsLogged.size === 0) return;
+    Object.entries(state.norme[tip]).forEach(([matId, norma]) => {
+      const m = state.materiale.find(x => x.id === matId);
+      if (!m) return;
+      const real = (matReal[matId] || 0) / apsLogged.size;
+      const dev = norma ? ((real - norma) / norma * 100) : 0;
+      rows.push({ tip, mat: m.nume, norma, real, dev });
+    });
+  });
+
+  if (rows.length === 0) {
+    cont.innerHTML = '<div class="empty">Adaugă norme în tab Apartamente pentru a vedea devierile</div>';
+    return;
+  }
+
+  const maxAbsDev = Math.max(...rows.map(r => Math.abs(r.dev)), 50);
+  cont.innerHTML = rows.map(r => {
+    const pctWidth = Math.min(Math.abs(r.dev) / maxAbsDev * 50, 50);
+    const cls = r.dev >= 0 ? 'plus' : 'minus';
+    const sign = r.dev >= 0 ? '+' : '';
+    return `<div class="devieri-row">
+      <div class="label">${r.tip.slice(0, 6)} - ${r.mat.slice(0, 12)}</div>
+      <div class="deviere-bar"><div class="center"></div><div class="fill ${cls}" style="width:0%"></div></div>
+      <div class="val ${cls}">${sign}${r.dev.toFixed(0)}%</div>
+    </div>`;
+  }).join('');
+  setTimeout(() => {
+    const fills = cont.querySelectorAll('.fill');
+    rows.forEach((r, i) => {
+      const pctWidth = Math.min(Math.abs(r.dev) / maxAbsDev * 50, 50);
+      fills[i].style.width = pctWidth + '%';
+    });
+  }, 100);
+}
+
+// Hook în renderKPI
+const _renderKPI_original = renderKPI;
+renderKPI = function () {
+  _renderKPI_original();
+  renderProgresBar();
+  renderDonut();
+  renderChartConsum7();
+  renderChartDevieri();
+};
 
 function init() {
   load();
