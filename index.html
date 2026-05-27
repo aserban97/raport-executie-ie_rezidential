@@ -167,6 +167,10 @@
               <option value="Zona comuna">Zonă comună</option>
             </select>
           </label>
+          <label>
+            Suprafață (mp, opțional)
+            <input type="number" id="suprafataAp" min="0" step="0.1" placeholder="ex: 75" />
+          </label>
         </div>
         <button type="submit" class="btn-primary">Adaugă</button>
       </form>
@@ -320,9 +324,44 @@
         <div id="progresBar"></div>
       </div>
 
-      <h3>🍩 Stare apartamente</h3>
+      <h3>🎯 Cifre cheie astăzi vs ieri</h3>
       <div class="card">
-        <div id="donutStare" class="chart-wrap"></div>
+        <div id="cardCheie"></div>
+      </div>
+
+      <h3>📅 Săptămâna curentă vs anterioară</h3>
+      <div class="card">
+        <div id="comparatieSaptamani"></div>
+      </div>
+
+      <h3>📈 Ritm zilnic — ultimele 14 zile (tub & cablu)</h3>
+      <div class="card">
+        <div id="chartRitm14"></div>
+      </div>
+
+      <h3>🏆 Top 5 zile productive</h3>
+      <div class="card">
+        <div id="topZile"></div>
+      </div>
+
+      <h3>⚡ Productivitate echipe head-to-head</h3>
+      <div class="card">
+        <div id="echipeH2H"></div>
+      </div>
+
+      <h3>🚀 Apartament cel mai rapid vs cel mai lent (per tip)</h3>
+      <div class="card">
+        <div id="ranikingAp"></div>
+      </div>
+
+      <h3>📐 Cantități per m² apartament</h3>
+      <div class="card">
+        <div id="cantitatiPerMp"></div>
+      </div>
+
+      <h3>⏱️ Ore pontaj vs producție (corelare)</h3>
+      <div class="card">
+        <div id="orePontajProductie"></div>
       </div>
 
       <h3>📈 Consum material - ultimele 7 zile</h3>
@@ -339,12 +378,6 @@
       <div class="card">
         <div id="productivitateGrid"></div>
         <p class="small">Cantitate medie pusă în operă de un electrician într-o zi. Date globale (toată perioada) vs. recent (ultimele 7 zile).</p>
-      </div>
-
-      <h3>🍩 Distribuție materiale per tip apartament</h3>
-      <div class="card">
-        <div id="donutMaterialeTip"></div>
-        <p class="small">Cum se distribuie consumul de materiale la apartamentele lucrate, pe tipuri</p>
       </div>
 
       <h3>⏱️ Durată medie execuție per tip apartament</h3>
