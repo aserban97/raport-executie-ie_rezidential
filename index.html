@@ -24,6 +24,7 @@
     <button class="tab" data-tab="calendar">Istoric</button>
     <button class="tab" data-tab="apartamente">Apart.</button>
     <button class="tab" data-tab="stoc">Stoc</button>
+    <button class="tab" data-tab="personal">Personal</button>
     <button class="tab" data-tab="kpi">KPI</button>
     <button class="tab" data-tab="setari">Setări</button>
   </nav>
@@ -205,6 +206,10 @@
       <h2>Stoc materiale</h2>
       <div class="card">
         <h3>Adaugă aprovizionare</h3>
+        <label>
+          Data primirii
+          <input type="date" id="aproData" />
+        </label>
         <div id="aprovizionareInputs"></div>
         <label>
           Notă (opțional)
@@ -218,6 +223,64 @@
 
       <h3>Istoric mișcări</h3>
       <div id="istoricMiscari" class="card"></div>
+    </section>
+
+    <!-- TAB: PERSONAL -->
+    <section id="tab-personal" class="tab-panel">
+      <h2>Personal</h2>
+
+      <h3>Pontaj zi</h3>
+      <div class="card">
+        <label>
+          Data
+          <input type="date" id="pontajData" />
+        </label>
+        <div id="listaMuncitoriPrezenta"></div>
+        <button type="button" class="btn-primary" id="btnSavePontaj">Salvează pontaj</button>
+      </div>
+
+      <h3>Listă muncitori</h3>
+      <form id="formMuncitor" class="card">
+        <div class="row">
+          <label>
+            Cod
+            <input type="text" id="muncitorCod" placeholder="ex: 001" required />
+          </label>
+          <label>
+            Nume
+            <input type="text" id="muncitorNume" placeholder="ex: Ion Popescu" required />
+          </label>
+        </div>
+        <div class="row">
+          <label>
+            Data început
+            <input type="date" id="muncitorStart" required />
+          </label>
+          <label>
+            Data sfârșit (gol = activ)
+            <input type="date" id="muncitorEnd" />
+          </label>
+        </div>
+        <button type="submit" class="btn-primary">Adaugă muncitor</button>
+      </form>
+
+      <h3>Muncitori activi</h3>
+      <div id="muncitoriActivi" class="card"></div>
+
+      <details class="card">
+        <summary>Istoric (muncitori care au plecat)</summary>
+        <div id="muncitoriIstoric"></div>
+      </details>
+
+      <h3>Sumar lunar prezență</h3>
+      <div class="card">
+        <label>
+          Lună
+          <input type="month" id="sumarLuna" />
+        </label>
+        <div id="sumarPrezenta"></div>
+        <button type="button" class="btn-secondary" id="btnExportPrezenta">📅 Export prezență (PDF)</button>
+      </div>
     </section>
 
     <!-- TAB: KPI -->

@@ -23,7 +23,12 @@ let state = {
   santier: 'Corallis',
   norme: {}, // { '2 camere': { tub20: 80, cyyf25: 150 }, '3 camere': {...} }
   aprovizionari: [], // [{ id, data, materiale: {tub20: 500, ...}, nota }]
+  muncitori: [], // [{ id, cod, nume, dataStart, dataEnd (null=activ) }]
+  prezenta: [], // [{ data, cod, ore }]
+  contorBackup: 0, // câte rapoarte de la ultimul backup auto
 };
+
+let raportEditareId = null; // ID raport în editare (null = nou)
 
 let pozeCurente = []; // {dataUrl, name} pentru raportul în lucru
 
@@ -71,6 +76,7 @@ document.querySelectorAll('.tab').forEach(btn => {
     if (btn.dataset.tab === 'apartamente') { renderApartamente(); renderNorme(); }
     if (btn.dataset.tab === 'calendar') renderCalendar();
     if (btn.dataset.tab === 'stoc') renderStoc();
+    if (btn.dataset.tab === 'personal') renderPersonal();
     if (btn.dataset.tab === 'kpi') renderKPI();
     if (btn.dataset.tab === 'setari') renderSetari();
   });
@@ -169,13 +175,23 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
   });
 
   const raport = {
-    id: uid(), data, utilizator: nume, oraStart, oraFinal,
+    id: raportEditareId || uid(), data, utilizator: nume, oraStart, oraFinal,
     nrPersoane, nrElectricieni, alocari, materiale,
     poze: [...pozeCurente], observatii,
-    createdAt: new Date().toISOString(),
+    createdAt: raportEditareId ?
+      (state.rapoarte.find(x => x.id === raportEditareId)?.createdAt || new Date().toISOString()) :
+      new Date().toISOString(),
+    updatedAt: raportEditareId ? new Date().toISOString() : undefined,
   };
 
-  state.rapoarte.unshift(raport);
+  if (raportEditareId) {
+    state.rapoarte = state.rapoarte.map(r => r.id === raportEditareId ? raport : r);
+    raportEditareId = null;
+    document.getElementById('formRaport').querySelector('.btn-primary').textContent = 'Salvează raport';
+  } else {
+    state.rapoarte.unshift(raport);
+    state.contorBackup = (state.contorBackup || 0) + 1;
+  }
   state.utilizator = nume;
 
   // Actualizează starea apartamentelor
@@ -186,6 +202,12 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
   });
 
   save();
+  // Backup auto la fiecare 10 rapoarte (doar pentru creări noi)
+  if (state.contorBackup >= 10) {
+    backupAutoJSON();
+    state.contorBackup = 0;
+    save();
+  }
   renderRapoarte();
   renderUserBadge();
   e.target.reset();
@@ -196,7 +218,69 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
   renderPreviewPoze();
   renderAlocari();
   toast('Raport salvat ✓');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 });
+
+function incarcaRaportPentruEditare(id) {
+  const r = state.rapoarte.find(x => x.id === id);
+  if (!r) return;
+  raportEditareId = id;
+  document.getElementById('data').value = r.data;
+  document.getElementById('numeIntrodus').value = r.utilizator || '';
+  document.getElementById('oraStart').value = r.oraStart || '07:00';
+  document.getElementById('oraFinal').value = r.oraFinal || '17:00';
+  document.getElementById('nrPersoane').value = r.nrPersoane || '';
+  document.getElementById('nrElectricieni').value = r.nrElectricieni || '';
+  document.getElementById('observatii').value = r.observatii || '';
+  pozeCurente = r.poze ? [...r.poze] : [];
+  renderPreviewPoze();
+
+  // Reconstruiește alocările
+  document.getElementById('listaAlocari').innerHTML = '';
+  r.alocari.forEach(a => {
+    adaugaAlocare();
+    const block = document.querySelectorAll('#listaAlocari .alocare-block');
+    const last = block[block.length - 1];
+    // setează ap
+    const apSelect = last.querySelector('.ap');
+    const apCustom = last.querySelector('.ap-custom');
+    const matchesOption = Array.from(apSelect.options).some(o => o.value === a.ap);
+    if (matchesOption) {
+      apSelect.value = a.ap;
+    } else {
+      apSelect.value = '__custom__';
+      apCustom.hidden = false;
+      apCustom.value = a.ap;
+    }
+    last.querySelector('.qty-oameni').value = a.oameni || '';
+    last.querySelector('.stare-noua').value = a.stareNoua || '';
+    // materiale
+    Object.entries(a.materiale || {}).forEach(([k, v]) => {
+      const inp = last.querySelector(`.mat-qty[data-mat="${k}"]`);
+      if (inp) inp.value = v;
+    });
+  });
+  if (r.alocari.length === 0) renderAlocari();
+
+  // Schimbă butonul
+  document.getElementById('formRaport').querySelector('.btn-primary').textContent = '💾 Salvează modificările';
+  toast(`Editezi raportul din ${fmtDate(r.data)}`);
+  // Navighează la tab raport
+  document.querySelector('.tab[data-tab="raport"]').click();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// Backup auto JSON la fiecare 10 rapoarte
+function backupAutoJSON() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ifort-backup-auto-${todayISO()}-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('💾 Backup automat descărcat (10 rapoarte)');
+}
 
 // ============= Poze =============
 function renderPreviewPoze() {
@@ -268,6 +352,7 @@ function renderRapoarte() {
       <div class="info"><b>Material:</b> ${matLista || '—'}</div>
       ${r.observatii ? `<div class="info"><b>Obs:</b> ${r.observatii}</div>` : ''}
       <div class="btns">
+        <button class="btn-secondary" data-edit="${r.id}">✏️ Editează</button>
         <button class="btn-secondary" data-pdf="${r.id}">PDF</button>
         <button class="btn-del" data-del="${r.id}">Șterge</button>
       </div>
@@ -282,6 +367,9 @@ function renderRapoarte() {
   cont.querySelectorAll('[data-pdf]').forEach(b => b.addEventListener('click', () => {
     const r = state.rapoarte.find(x => x.id === b.dataset.pdf);
     if (r) genereazaPDF(r);
+  }));
+  cont.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => {
+    incarcaRaportPentruEditare(b.dataset.edit);
   }));
 }
 
@@ -733,6 +821,10 @@ function renderNorme() {
 
 // ============= STOC =============
 function renderStoc() {
+  // Default data = azi
+  const dataInput = document.getElementById('aproData');
+  if (dataInput && !dataInput.value) dataInput.value = todayISO();
+
   // Inputs aprovizionare
   const cont = document.getElementById('aprovizionareInputs');
   cont.innerHTML = '';
@@ -827,12 +919,14 @@ document.getElementById('btnAdaugaApro').addEventListener('click', () => {
     if (v > 0) materiale[inp.dataset.mat] = v;
   });
   if (Object.keys(materiale).length === 0) { toast('Adaugă cel puțin un material'); return; }
+  const dataApro = document.getElementById('aproData').value || todayISO();
   const nota = document.getElementById('aproNota').value.trim();
   state.aprovizionari.push({
-    id: uid(), data: todayISO(), materiale, nota,
+    id: uid(), data: dataApro, materiale, nota,
     createdAt: new Date().toISOString(),
   });
   document.getElementById('aproNota').value = '';
+  document.getElementById('aproData').value = todayISO();
   document.querySelectorAll('.apro-qty').forEach(i => i.value = '');
   save(); renderStoc();
   toast('Aprovizionare salvată ✓');
@@ -1395,6 +1489,242 @@ function renderPredictieProiect() {
     </details>
   `;
 }
+
+// ============= PERSONAL / PONTAJ =============
+function renderPersonal() {
+  // Pontaj data default = azi
+  const pontajData = document.getElementById('pontajData');
+  if (!pontajData.value) pontajData.value = todayISO();
+
+  // Sumar lună default
+  const sumarLuna = document.getElementById('sumarLuna');
+  if (!sumarLuna.value) {
+    const d = new Date();
+    sumarLuna.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  renderListaMuncitoriPrezenta();
+  renderMuncitoriActivi();
+  renderMuncitoriIstoric();
+  renderSumarPrezenta();
+
+  // Start date default azi
+  const startInput = document.getElementById('muncitorStart');
+  if (!startInput.value) startInput.value = todayISO();
+}
+
+function muncitoriiActiviLaData(dataISO) {
+  return state.muncitori.filter(m =>
+    m.dataStart <= dataISO && (!m.dataEnd || m.dataEnd >= dataISO)
+  );
+}
+
+function renderListaMuncitoriPrezenta() {
+  const cont = document.getElementById('listaMuncitoriPrezenta');
+  const data = document.getElementById('pontajData').value || todayISO();
+  const activi = muncitoriiActiviLaData(data);
+  const prezentaZi = state.prezenta.filter(p => p.data === data);
+
+  if (activi.length === 0) {
+    cont.innerHTML = '<div class="empty">Niciun muncitor activ în această dată. Adaugă mai jos.</div>';
+    return;
+  }
+
+  let html = '<div style="margin-top:10px">';
+  activi.forEach(m => {
+    const p = prezentaZi.find(x => x.cod === m.cod);
+    const ore = p ? p.ore : '';
+    html += `<div class="apro-row" data-cod="${m.cod}">
+      <span class="nume"><b>${m.cod}</b> — ${m.nume}</span>
+      <input type="number" class="pontaj-ore" data-cod="${m.cod}" min="0" max="16" step="0.5" placeholder="ore" value="${ore}" style="max-width:90px" />
+      <span class="um">ore</span>
+    </div>`;
+  });
+  html += '</div>';
+  cont.innerHTML = html;
+}
+
+document.getElementById('pontajData').addEventListener('change', renderListaMuncitoriPrezenta);
+
+document.getElementById('btnSavePontaj').addEventListener('click', () => {
+  const data = document.getElementById('pontajData').value || todayISO();
+  // Șterge prezența veche pentru data asta
+  state.prezenta = state.prezenta.filter(p => p.data !== data);
+  // Adaugă nouă
+  document.querySelectorAll('.pontaj-ore').forEach(inp => {
+    const ore = parseFloat(inp.value);
+    if (ore > 0) {
+      state.prezenta.push({ data, cod: inp.dataset.cod, ore });
+    }
+  });
+  save();
+  toast(`Pontaj salvat pentru ${fmtDate(data)} ✓`);
+  renderSumarPrezenta();
+});
+
+function renderMuncitoriActivi() {
+  const cont = document.getElementById('muncitoriActivi');
+  const azi = todayISO();
+  const activi = state.muncitori.filter(m => !m.dataEnd || m.dataEnd >= azi);
+  if (activi.length === 0) {
+    cont.innerHTML = '<div class="empty">Niciun muncitor activ. Adaugă mai sus.</div>';
+    return;
+  }
+  cont.innerHTML = activi.map(m => `
+    <div class="raport-item">
+      <div class="head">
+        <strong>${m.cod} — ${m.nume}</strong>
+        <span class="info">început: ${fmtDate(m.dataStart)}</span>
+      </div>
+      <div class="btns">
+        <button class="btn-secondary" data-end="${m.id}">📅 Marcheaza plecat</button>
+        <button class="btn-del" data-del-m="${m.id}">Șterge</button>
+      </div>
+    </div>
+  `).join('');
+
+  cont.querySelectorAll('[data-end]').forEach(b => b.addEventListener('click', () => {
+    const m = state.muncitori.find(x => x.id === b.dataset.end);
+    if (!m) return;
+    const data = prompt(`Data plecării pentru ${m.cod} — ${m.nume} (YYYY-MM-DD):`, todayISO());
+    if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) return;
+    m.dataEnd = data;
+    save(); renderPersonal();
+    toast('Marcat ca plecat ✓');
+  }));
+  cont.querySelectorAll('[data-del-m]').forEach(b => b.addEventListener('click', () => {
+    if (!confirm('Șterge muncitorul DEFINITIV? Istoricul prezenței rămâne.')) return;
+    state.muncitori = state.muncitori.filter(x => x.id !== b.dataset.delM);
+    save(); renderPersonal();
+  }));
+}
+
+function renderMuncitoriIstoric() {
+  const cont = document.getElementById('muncitoriIstoric');
+  const azi = todayISO();
+  const istoric = state.muncitori.filter(m => m.dataEnd && m.dataEnd < azi);
+  if (istoric.length === 0) {
+    cont.innerHTML = '<div class="empty">Nimeni în istoric</div>';
+    return;
+  }
+  cont.innerHTML = istoric.map(m => `
+    <div class="raport-item">
+      <div class="head">
+        <strong>${m.cod} — ${m.nume}</strong>
+        <span class="info">${fmtDate(m.dataStart)} → ${fmtDate(m.dataEnd)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+document.getElementById('formMuncitor').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const cod = document.getElementById('muncitorCod').value.trim();
+  const nume = document.getElementById('muncitorNume').value.trim();
+  const dataStart = document.getElementById('muncitorStart').value;
+  const dataEnd = document.getElementById('muncitorEnd').value || null;
+  if (state.muncitori.some(m => m.cod === cod && (!m.dataEnd))) {
+    toast('Cod deja folosit de un muncitor activ');
+    return;
+  }
+  state.muncitori.push({ id: uid(), cod, nume, dataStart, dataEnd });
+  save(); renderPersonal();
+  e.target.reset();
+  document.getElementById('muncitorStart').value = todayISO();
+  toast('Muncitor adăugat ✓');
+});
+
+function renderSumarPrezenta() {
+  const cont = document.getElementById('sumarPrezenta');
+  const luna = document.getElementById('sumarLuna').value;
+  if (!luna) { cont.innerHTML = ''; return; }
+  const start = `${luna}-01`;
+  const [an, lunaNr] = luna.split('-').map(Number);
+  const ultimaZi = new Date(an, lunaNr, 0).getDate();
+  const end = `${luna}-${String(ultimaZi).padStart(2, '0')}`;
+
+  // Strângem ore per muncitor în lună
+  const oreLuna = {};
+  state.prezenta.filter(p => p.data >= start && p.data <= end).forEach(p => {
+    oreLuna[p.cod] = (oreLuna[p.cod] || 0) + p.ore;
+  });
+
+  // Toți muncitorii activi măcar 1 zi în lună (dataStart <= end și (dataEnd >= start sau dataEnd null))
+  const muncitoriLuna = state.muncitori.filter(m =>
+    m.dataStart <= end && (!m.dataEnd || m.dataEnd >= start)
+  );
+
+  if (muncitoriLuna.length === 0) {
+    cont.innerHTML = '<div class="empty">Niciun muncitor în această lună</div>';
+    return;
+  }
+
+  let totalOre = 0;
+  let html = '<table style="width:100%;border-collapse:collapse;margin-top:10px"><thead><tr><th style="text-align:left;padding:8px;border-bottom:1px solid #e5e7eb">Cod</th><th style="text-align:left;padding:8px;border-bottom:1px solid #e5e7eb">Nume</th><th style="text-align:right;padding:8px;border-bottom:1px solid #e5e7eb">Ore</th><th style="text-align:right;padding:8px;border-bottom:1px solid #e5e7eb">Zile</th></tr></thead><tbody>';
+  muncitoriLuna.sort((a, b) => a.cod.localeCompare(b.cod)).forEach(m => {
+    const ore = oreLuna[m.cod] || 0;
+    const zile = state.prezenta.filter(p => p.cod === m.cod && p.data >= start && p.data <= end).length;
+    totalOre += ore;
+    html += `<tr><td style="padding:8px;border-bottom:1px solid #f3f4f6"><b>${m.cod}</b></td><td style="padding:8px;border-bottom:1px solid #f3f4f6">${m.nume}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #f3f4f6">${ore.toFixed(1)}h</td><td style="text-align:right;padding:8px;border-bottom:1px solid #f3f4f6">${zile}</td></tr>`;
+  });
+  html += `<tr><td colspan="2" style="padding:8px;text-align:right;font-weight:700">TOTAL</td><td style="text-align:right;padding:8px;font-weight:700;color:#1e40af">${totalOre.toFixed(1)}h</td><td></td></tr>`;
+  html += '</tbody></table>';
+  cont.innerHTML = html;
+}
+
+document.getElementById('sumarLuna').addEventListener('change', renderSumarPrezenta);
+
+document.getElementById('btnExportPrezenta').addEventListener('click', () => {
+  const luna = document.getElementById('sumarLuna').value;
+  if (!luna) { toast('Selectează o lună'); return; }
+  const start = `${luna}-01`;
+  const [an, lunaNr] = luna.split('-').map(Number);
+  const ultimaZi = new Date(an, lunaNr, 0).getDate();
+  const end = `${luna}-${String(ultimaZi).padStart(2, '0')}`;
+
+  const oreLuna = {};
+  const zileLuna = {};
+  state.prezenta.filter(p => p.data >= start && p.data <= end).forEach(p => {
+    oreLuna[p.cod] = (oreLuna[p.cod] || 0) + p.ore;
+    if (!zileLuna[p.cod]) zileLuna[p.cod] = new Set();
+    zileLuna[p.cod].add(p.data);
+  });
+  const muncitoriLuna = state.muncitori.filter(m =>
+    m.dataStart <= end && (!m.dataEnd || m.dataEnd >= start)
+  );
+
+  let totalOre = 0;
+  const rows = muncitoriLuna.sort((a, b) => a.cod.localeCompare(b.cod)).map(m => {
+    const ore = oreLuna[m.cod] || 0;
+    const zile = zileLuna[m.cod] ? zileLuna[m.cod].size : 0;
+    totalOre += ore;
+    return `<tr><td><b>${m.cod}</b></td><td>${m.nume}</td><td style="text-align:right">${ore.toFixed(1)}</td><td style="text-align:right">${zile}</td></tr>`;
+  }).join('');
+
+  const lunaNume = new Date(an, lunaNr - 1, 1).toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Pontaj ${lunaNume}</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
+.page{background:white;padding:30px;max-width:780px;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1)}
+.header{display:flex;align-items:center;gap:18px;border-bottom:3px solid #1e40af;padding-bottom:12px;margin-bottom:18px}
+.header .logo{width:80px}.header-text .company{font-size:22px;font-weight:700;color:#1e40af}.header-text .sub{font-size:13px;color:#6b7280}
+h2{font-size:15px;color:#374151;margin-top:22px;margin-bottom:8px;border-bottom:1px solid #e5e7eb;padding-bottom:4px}
+table{width:100%;border-collapse:collapse}td,th{padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:14px}th{background:#f3f4f6;text-align:left}
+.total{font-weight:700;background:#f9fafb}
+.no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer}
+@media print{body{background:white}.page{margin:0;box-shadow:none}.no-print{display:none}}
+</style></head><body>
+<button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
+<div class="page">
+  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">iFort Systems S.R.L.</div><div class="sub">Pontaj — ${lunaNume} (intern, arhivă firmă)</div></div></div>
+  <h2>Sumar prezență</h2>
+  <table><thead><tr><th>Cod</th><th>Nume</th><th style="text-align:right">Ore</th><th style="text-align:right">Zile</th></tr></thead><tbody>${rows}<tr class="total"><td colspan="2" style="text-align:right">TOTAL</td><td style="text-align:right">${totalOre.toFixed(1)}h</td><td></td></tr></tbody></table>
+  <div style="margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center">Document generat — iFort Systems S.R.L.</div>
+</div></body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(html); w.document.close();
+});
 
 // ============= PRODUCTIVITATE PER ELECTRICIAN-ZI =============
 function renderProductivitate() {
