@@ -11,7 +11,9 @@ const MATERIALE_DEFAULT = [
   { id: 'cyyf15', nume: 'CYYF 3x1.5', um: 'm' },
   { id: 'cyyf25', nume: 'CYYF 3x2.5', um: 'm' },
   { id: 'cyyf4', nume: 'CYYF 3x4', um: 'm' },
-  { id: 'cablu_4x15', nume: 'Cablu 4x1.5mmp', um: 'm' },
+  { id: 'cablu_4x15', nume: 'CYYF 4x1.5', um: 'm' },
+  { id: 'dibluri', nume: 'Dibluri', um: 'buc' },
+  { id: 'suruburi', nume: 'Șuruburi', um: 'buc' },
 ];
 
 let state = {
@@ -42,10 +44,15 @@ function load() {
     }
   } catch (e) { console.error('Load error', e); }
   if (!state.materiale || state.materiale.length === 0) state.materiale = [...MATERIALE_DEFAULT];
-  // Migrare: adaugă materiale default lipsă (pentru utilizatori existenți)
+  // Migrare: adaugă materiale default lipsă + actualizează denumirile la cele default
   MATERIALE_DEFAULT.forEach(def => {
-    if (!state.materiale.some(m => m.id === def.id)) {
+    const existing = state.materiale.find(m => m.id === def.id);
+    if (!existing) {
       state.materiale.push({ ...def });
+    } else {
+      // Actualizează denumirea și UM dacă s-au schimbat în default (păstrează istoricul prin ID)
+      existing.nume = def.nume;
+      existing.um = def.um;
     }
   });
 }
