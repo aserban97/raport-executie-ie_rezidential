@@ -221,6 +221,7 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
   const oraStart = document.getElementById('oraStart').value;
   const oraFinal = document.getElementById('oraFinal').value;
   const nrPersoane = parseInt(document.getElementById('nrPersoane').value, 10);
+  const nrSefi = parseInt(document.getElementById('nrSefi').value, 10) || 0;
   const nrElectricieni = parseInt(document.getElementById('nrElectricieni').value, 10) || 0;
   const observatii = document.getElementById('observatii').value.trim();
 
@@ -251,7 +252,7 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
 
   const raport = {
     id: raportEditareId || uid(), data, utilizator: nume, oraStart, oraFinal,
-    nrPersoane, nrElectricieni, alocari, materiale,
+    nrPersoane, nrSefi, nrElectricieni, alocari, materiale,
     poze: [...pozeCurente], observatii,
     createdAt: raportEditareId ?
       (state.rapoarte.find(x => x.id === raportEditareId)?.createdAt || new Date().toISOString()) :
@@ -305,6 +306,7 @@ function incarcaRaportPentruEditare(id) {
   document.getElementById('oraStart').value = r.oraStart || '07:00';
   document.getElementById('oraFinal').value = r.oraFinal || '17:00';
   document.getElementById('nrPersoane').value = r.nrPersoane || '';
+  document.getElementById('nrSefi').value = r.nrSefi || 0;
   document.getElementById('nrElectricieni').value = r.nrElectricieni || '';
   document.getElementById('observatii').value = r.observatii || '';
   pozeCurente = r.poze ? [...r.poze] : [];
@@ -425,7 +427,7 @@ function renderRapoarte() {
     item.innerHTML = `
       <div class="head">
         <strong>${fmtDate(r.data)}</strong>
-        <span class="info">${r.utilizator || '—'} • ${r.nrPersoane}p (${r.nrElectricieni || 0}el) • ${r.oraStart}-${r.oraFinal}</span>
+        <span class="info">${r.utilizator || '—'} • ${r.nrPersoane}p (${r.nrSefi || 0}s, ${r.nrElectricieni || 0}el) • ${r.oraStart}-${r.oraFinal}</span>
       </div>
       <div class="info"><b>Lucrat:</b> ${apartLista}</div>
       <div class="info"><b>Material:</b> ${matLista || '—'}</div>
@@ -487,7 +489,8 @@ function genereazaPDF(r, extern = false) {
     <div><b>Antreprenor general:</b> ${antreprenor}</div>
     <div><b>Șantier:</b> ${santier}</div>
     ${extern ? '' : `<div><b>Persoane pe șantier:</b> ${r.nrPersoane}</div>
-    <div><b>din care electricieni:</b> ${r.nrElectricieni || 0}</div>`}
+    <div><b>Șefi de echipă:</b> ${r.nrSefi || 0}</div>
+    <div><b>Electricieni:</b> ${r.nrElectricieni || 0}</div>`}
     <div><b>Responsabil raport:</b> ${r.utilizator || '—'}</div>
   </div>
 
