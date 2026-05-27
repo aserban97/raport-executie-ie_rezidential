@@ -432,7 +432,8 @@ function renderRapoarte() {
       ${r.observatii ? `<div class="info"><b>Obs:</b> ${r.observatii}</div>` : ''}
       <div class="btns">
         <button class="btn-secondary" data-edit="${r.id}">✏️ Editează</button>
-        <button class="btn-secondary" data-pdf="${r.id}">PDF</button>
+        <button class="btn-secondary" data-pdf-ext="${r.id}">📄 Extern</button>
+        <button class="btn-secondary" data-pdf-int="${r.id}">🔒 Intern</button>
         <button class="btn-del" data-del="${r.id}">Șterge</button>
       </div>
     `;
@@ -443,9 +444,13 @@ function renderRapoarte() {
     state.rapoarte = state.rapoarte.filter(x => x.id !== b.dataset.del);
     save(); renderRapoarte();
   }));
-  cont.querySelectorAll('[data-pdf]').forEach(b => b.addEventListener('click', () => {
-    const r = state.rapoarte.find(x => x.id === b.dataset.pdf);
-    if (r) genereazaPDF(r);
+  cont.querySelectorAll('[data-pdf-ext]').forEach(b => b.addEventListener('click', () => {
+    const r = state.rapoarte.find(x => x.id === b.dataset.pdfExt);
+    if (r) genereazaPDF(r, true);
+  }));
+  cont.querySelectorAll('[data-pdf-int]').forEach(b => b.addEventListener('click', () => {
+    const r = state.rapoarte.find(x => x.id === b.dataset.pdfInt);
+    if (r) genereazaPDF(r, false);
   }));
   cont.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => {
     incarcaRaportPentruEditare(b.dataset.edit);
@@ -461,7 +466,7 @@ function matRowsHTML(materialeObj) {
   return rows || '<tr><td colspan="2" style="text-align:center;color:#9ca3af">Nicio cantitate</td></tr>';
 }
 
-function genereazaPDF(r) {
+function genereazaPDF(r, extern = false) {
   const antreprenor = state.antreprenor || 'KESZ';
   const santier = state.santier || 'Corallis';
 
@@ -481,16 +486,16 @@ function genereazaPDF(r) {
     <div><b>Program lucru:</b> ${r.oraStart} — ${r.oraFinal}</div>
     <div><b>Antreprenor general:</b> ${antreprenor}</div>
     <div><b>Șantier:</b> ${santier}</div>
-    <div><b>Persoane pe șantier:</b> ${r.nrPersoane}</div>
-    <div><b>din care electricieni:</b> ${r.nrElectricieni || 0}</div>
+    ${extern ? '' : `<div><b>Persoane pe șantier:</b> ${r.nrPersoane}</div>
+    <div><b>din care electricieni:</b> ${r.nrElectricieni || 0}</div>`}
     <div><b>Responsabil raport:</b> ${r.utilizator || '—'}</div>
   </div>
 
   <h2>Apartamente / zone lucrate azi</h2>
   <table>
-    <thead><tr><th>Locație</th><th style="text-align:right">Oameni</th><th style="text-align:right">Stare</th></tr></thead>
+    <thead><tr><th>Locație</th>${extern ? '' : '<th style="text-align:right">Oameni</th>'}<th style="text-align:right">Stare</th></tr></thead>
     <tbody>
-      ${r.alocari.map(a => `<tr><td>${a.ap}</td><td style="text-align:right">${a.oameni || '—'}</td><td style="text-align:right">${{in_lucru:'În lucru',gata:'Gata',blocat:'Blocat'}[a.stareNoua] || '—'}</td></tr>`).join('')}
+      ${r.alocari.map(a => `<tr><td>${a.ap}</td>${extern ? '' : `<td style="text-align:right">${a.oameni || '—'}</td>`}<td style="text-align:right">${{in_lucru:'În lucru',gata:'Gata',blocat:'Blocat'}[a.stareNoua] || '—'}</td></tr>`).join('')}
     </tbody>
   </table>
 
@@ -518,7 +523,7 @@ function genereazaPDF(r) {
 
   <div class="info-grid">
     <div><b>Locație:</b> ${a.ap}</div>
-    <div><b>Oameni alocați:</b> ${a.oameni || '—'}</div>
+    ${extern ? '' : `<div><b>Oameni alocați:</b> ${a.oameni || '—'}</div>`}
     <div><b>Stare:</b> ${{in_lucru:'În lucru',gata:'Gata',blocat:'Blocat'}[a.stareNoua] || '—'}</div>
     <div><b>Antreprenor:</b> ${antreprenor}</div>
   </div>
@@ -588,9 +593,13 @@ ${pozePage}
   w.document.close();
 }
 
-document.getElementById('btnPDF').addEventListener('click', () => {
+document.getElementById('btnPDFExtern').addEventListener('click', () => {
   if (state.rapoarte.length === 0) { toast('Salvează un raport mai întâi'); return; }
-  genereazaPDF(state.rapoarte[0]);
+  genereazaPDF(state.rapoarte[0], true);
+});
+document.getElementById('btnPDFIntern').addEventListener('click', () => {
+  if (state.rapoarte.length === 0) { toast('Salvează un raport mai întâi'); return; }
+  genereazaPDF(state.rapoarte[0], false);
 });
 
 // ============= Apartamente =============
@@ -1099,13 +1108,11 @@ function renderCalendar() {
     cell.innerHTML = `<div class="num">${zi}</div>${rapoarteZi.length ? `<div class="marker">${rapoarteZi.length} raport${rapoarteZi.length > 1 ? 'e' : ''}</div>` : ''}`;
     if (rapoarteZi.length > 0) {
       cell.addEventListener('click', () => {
-        // generează PDF pentru prima zi (sau combinat dacă sunt mai multe)
-        if (rapoarteZi.length === 1) genereazaPDF(rapoarteZi[0]);
-        else {
-          if (confirm(`${rapoarteZi.length} rapoarte în ${fmtDate(isoData)}. Generez PDF combinat?`)) {
-            genereazaPDFInterval(isoData, isoData, `Raport ${fmtDate(isoData)}`);
-          }
-        }
+        const tip = prompt(`${fmtDate(isoData)} — ${rapoarteZi.length} raport(e)\n\nCe PDF vrei?\n1. Extern (pentru antreprenor, fără nr. muncitori)\n2. Intern (pentru firmă, complet)`, '1');
+        if (!tip) return;
+        const extern = tip === '1';
+        if (rapoarteZi.length === 1) genereazaPDF(rapoarteZi[0], extern);
+        else genereazaPDFInterval(isoData, isoData, `Raport ${fmtDate(isoData)}`);
       });
     }
     cont.appendChild(cell);
@@ -1125,11 +1132,16 @@ function renderCalendar() {
     item.innerHTML = `
       <div class="head">
         <strong>${fmtDate(r.data)}</strong>
-        <button class="btn-secondary" data-pdf="${r.id}" style="padding:4px 10px;font-size:12px">PDF</button>
+        <span class="info">${r.nrPersoane}p (${r.nrElectricieni || 0}el)</span>
       </div>
-      <div class="info">${apartLista} • ${r.nrPersoane}p (${r.nrElectricieni || 0}el)</div>
+      <div class="info">${apartLista}</div>
+      <div class="btns">
+        <button class="btn-secondary" data-pdf-ext="${r.id}" style="padding:4px 10px;font-size:12px">📄 Extern</button>
+        <button class="btn-secondary" data-pdf-int="${r.id}" style="padding:4px 10px;font-size:12px">🔒 Intern</button>
+      </div>
     `;
-    item.querySelector('[data-pdf]').addEventListener('click', () => genereazaPDF(r));
+    item.querySelector('[data-pdf-ext]').addEventListener('click', () => genereazaPDF(r, true));
+    item.querySelector('[data-pdf-int]').addEventListener('click', () => genereazaPDF(r, false));
     ist.appendChild(item);
   });
 }
