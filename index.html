@@ -272,6 +272,28 @@
         <div id="muncitoriIstoric"></div>
       </details>
 
+      <h3>Echipe</h3>
+      <form id="formEchipa" class="card">
+        <p class="small">Definește echipe fixe pe baza codurilor muncitorilor. În raportul zilnic poți alege ce echipă a lucrat pe ce apartament.</p>
+        <div class="row">
+          <label>
+            Nume echipă
+            <input type="text" id="echipaNume" placeholder="ex: Echipa A" required />
+          </label>
+          <label>
+            Culoare
+            <input type="color" id="echipaCuloare" value="#1e40af" />
+          </label>
+        </div>
+        <label>
+          Membri (selectează din lista de muncitori activi)
+          <select id="echipaMembri" multiple size="5" style="height:auto"></select>
+        </label>
+        <p class="small">Ține Ctrl/Cmd apăsat pentru selecție multiplă.</p>
+        <button type="submit" class="btn-primary">Salvează echipă</button>
+      </form>
+      <div id="listaEchipe" class="card"></div>
+
       <h3>Sumar lunar prezență</h3>
       <div class="card">
         <label>
@@ -324,6 +346,22 @@
       <div class="card">
         <div id="durataPerTip"></div>
         <p class="small">Calculat automat din zile lucrate la apartamentele finalizate (Gata)</p>
+      </div>
+
+      <h3>🔧 Rapoarte materiale auxiliare (per 1m tub)</h3>
+      <div class="card">
+        <div id="rapoarteAuxiliare"></div>
+        <p class="small">Calculat din istoricul tău: la 1m tub rigid 20mm cât pui în medie din fiecare auxiliar. Util pentru estimări rapide.</p>
+      </div>
+
+      <h3>🏗️ Productivitate per echipă</h3>
+      <div class="card">
+        <div id="productivitateEchipe"></div>
+      </div>
+
+      <h3>⚠️ Alerte stoc</h3>
+      <div class="card">
+        <div id="alerteStoc"></div>
       </div>
 
       <h3>📅 Predicție timp rămas proiect</h3>

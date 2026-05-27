@@ -27,10 +27,12 @@ let state = {
   aprovizionari: [], // [{ id, data, materiale: {tub20: 500, ...}, nota }]
   muncitori: [], // [{ id, cod, nume, dataStart, dataEnd (null=activ) }]
   prezenta: [], // [{ data, cod, ore }]
+  echipe: [], // [{ id, nume, codMembri: ['001','002'], culoare }]
   contorBackup: 0, // câte rapoarte de la ultimul backup auto
 };
 
 let raportEditareId = null; // ID raport în editare (null = nou)
+let aproEditareId = null; // ID aprovizionare în editare (null = nou)
 
 let pozeCurente = []; // {dataUrl, name} pentru raportul în lucru
 
@@ -113,6 +115,10 @@ function adaugaAlocare() {
     </div>
   `).join('');
 
+  const echipeOptions = (state.echipe || []).map(e =>
+    `<option value="${e.id}">${e.nume}</option>`
+  ).join('');
+
   block.innerHTML = `
     <div class="alocare-head">
       <select class="ap">
@@ -122,6 +128,10 @@ function adaugaAlocare() {
       </select>
       <input type="text" class="ap-custom" placeholder="ex: Ap 47 sau Tablou subsol" ${hasApartamente ? 'hidden' : ''} />
       <input type="number" class="qty-oameni" min="1" max="50" placeholder="Oameni" />
+      <select class="echipa-sel">
+        <option value="">— Echipă —</option>
+        ${echipeOptions}
+      </select>
       <select class="stare-noua">
         <option value="">— Stare —</option>
         <option value="in_lucru">În lucru</option>
@@ -131,6 +141,9 @@ function adaugaAlocare() {
       <button type="button" class="btn-del">×</button>
     </div>
     <div class="alocare-materiale">${materialeHTML}</div>
+    <div style="margin-top:8px;text-align:right">
+      <button type="button" class="btn-secondary btn-sugestii" style="font-size:12px;padding:6px 12px">💡 Sugestii din istoric (pe baza tub)</button>
+    </div>
   `;
   if (!hasApartamente) {
     block.querySelector('.ap').style.display = 'none';
@@ -142,7 +155,61 @@ function adaugaAlocare() {
     if (e.target.value === '__custom__') customInput.hidden = false;
     else { customInput.hidden = true; customInput.value = ''; }
   });
+  block.querySelector('.btn-sugestii').addEventListener('click', () => aplicaSugestii(block));
   cont.appendChild(block);
+}
+
+// Calculează rapoartele aux/tub din istoric
+function rapoarteAuxiliarePerTub() {
+  let totalTub = 0;
+  const totalAux = {};
+  state.rapoarte.forEach(r => {
+    r.alocari.forEach(a => {
+      const tub = a.materiale?.tub20 || 0;
+      if (tub <= 0) return;
+      totalTub += tub;
+      Object.entries(a.materiale || {}).forEach(([k, v]) => {
+        if (k === 'tub20') return;
+        totalAux[k] = (totalAux[k] || 0) + v;
+      });
+    });
+  });
+  if (totalTub === 0) return null;
+  const ratios = {};
+  Object.entries(totalAux).forEach(([k, v]) => { ratios[k] = v / totalTub; });
+  return { totalTub, ratios };
+}
+
+function aplicaSugestii(block) {
+  const tubInput = block.querySelector('.mat-qty[data-mat="tub20"]');
+  const tubVal = parseFloat(tubInput?.value);
+  if (!tubVal || tubVal <= 0) {
+    toast('Introdu cantitatea de tub mai întâi');
+    return;
+  }
+  const data = rapoarteAuxiliarePerTub();
+  if (!data) { toast('Istoric insuficient pentru sugestii'); return; }
+
+  let applied = 0;
+  block.querySelectorAll('.mat-qty').forEach(inp => {
+    const id = inp.dataset.mat;
+    if (id === 'tub20') return;
+    const ratio = data.ratios[id];
+    if (!ratio || ratio <= 0) return;
+    // doar dacă e gol — nu suprascriem ce a pus deja
+    if (!inp.value || parseFloat(inp.value) === 0) {
+      const sugestie = tubVal * ratio;
+      // rotunjire: cote/cleme/manșoane/dibluri/șuruburi la întreg; cabluri la 0.5
+      const m = state.materiale.find(x => x.id === id);
+      if (m && m.um === 'buc') {
+        inp.value = Math.round(sugestie);
+      } else {
+        inp.value = (Math.round(sugestie * 2) / 2).toFixed(1);
+      }
+      applied++;
+    }
+  });
+  toast(applied > 0 ? `${applied} sugestii aplicate ✓` : 'Toate câmpurile sunt deja completate');
 }
 
 document.getElementById('btnAdaugaAlocare').addEventListener('click', adaugaAlocare);
@@ -163,12 +230,13 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
     if (ap === '__custom__') ap = block.querySelector('.ap-custom').value.trim();
     const oameni = parseInt(block.querySelector('.qty-oameni').value, 10) || 0;
     const stareNoua = block.querySelector('.stare-noua').value;
+    const echipaId = block.querySelector('.echipa-sel')?.value || '';
     const materialeAp = {};
     block.querySelectorAll('.mat-qty').forEach(inp => {
       const v = parseFloat(inp.value);
       if (v > 0) materialeAp[inp.dataset.mat] = v;
     });
-    if (ap) alocari.push({ ap, oameni, stareNoua, materiale: materialeAp });
+    if (ap) alocari.push({ ap, oameni, stareNoua, echipaId, materiale: materialeAp });
   });
 
   if (alocari.length === 0) { toast('Completează apartamentul / zona la cel puțin un rând'); return; }
@@ -261,6 +329,8 @@ function incarcaRaportPentruEditare(id) {
     }
     last.querySelector('.qty-oameni').value = a.oameni || '';
     last.querySelector('.stare-noua').value = a.stareNoua || '';
+    const echSel = last.querySelector('.echipa-sel');
+    if (echSel && a.echipaId) echSel.value = a.echipaId;
     // materiale
     Object.entries(a.materiale || {}).forEach(([k, v]) => {
       const inp = last.querySelector(`.mat-qty[data-mat="${k}"]`);
@@ -342,7 +412,9 @@ function renderRapoarte() {
     return;
   }
   cont.innerHTML = '';
-  state.rapoarte.slice(0, 30).forEach(r => {
+  // Ordine cronologică: recent primul (după data raport, nu după când l-am introdus)
+  const sortate = state.rapoarte.slice().sort((a, b) => b.data.localeCompare(a.data) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+  sortate.slice(0, 30).forEach(r => {
     const item = document.createElement('div');
     item.className = 'raport-item';
     const apartLista = r.alocari.map(a => `${a.ap}${a.oameni ? ` (${a.oameni}p)` : ''}`).join(', ');
@@ -542,7 +614,9 @@ function renderApartamente() {
       const stari = ['neinceput', 'in_lucru', 'gata', 'blocat'];
       const nume = { neinceput: 'Neînceput', in_lucru: 'În lucru', gata: 'Gata', blocat: 'Blocat' };
       const optHTML = stari.map(s => `${s === a.stare ? '→' : '  '} ${nume[s]}`).join('\n');
-      const r = prompt(`${a.cod} (${a.tip})\nStare curentă: ${nume[a.stare || 'neinceput']}\n\nIntrodu nr stare nouă:\n1. Neînceput\n2. În lucru\n3. Gata\n4. Blocat\n5. Șterge apartament`, '');
+      const dur = durataApartament(a.cod);
+      const durTxt = dur ? `\n📅 Început: ${fmtDate(dur.start)}${dur.end ? `, Finalizat: ${fmtDate(dur.end)}` : ' (în lucru)'}\n⏱️ Durată: ${dur.zile} zile` : '\n(Niciun raport încă)';
+      const r = prompt(`${a.cod} (${a.tip})\nStare curentă: ${nume[a.stare || 'neinceput']}${durTxt}\n\nIntrodu nr stare nouă:\n1. Neînceput\n2. În lucru\n3. Gata\n4. Blocat\n5. Șterge apartament`, '');
       if (!r) return;
       if (r === '5') {
         if (confirm(`Ștergi ${a.cod}?`)) {
@@ -874,7 +948,9 @@ function renderStoc() {
     istCont.innerHTML = '<div class="empty">Nicio aprovizionare încă</div>';
   } else {
     istCont.innerHTML = '';
-    state.aprovizionari.slice().reverse().forEach(a => {
+    // Sortare cronologică: recent primul (după data primirii, nu createdAt)
+    const sortate = state.aprovizionari.slice().sort((a, b) => b.data.localeCompare(a.data) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+    sortate.forEach(a => {
       const item = document.createElement('div');
       item.className = 'raport-item';
       const matLista = Object.entries(a.materiale).map(([k, v]) => {
@@ -884,16 +960,20 @@ function renderStoc() {
       item.innerHTML = `
         <div class="head">
           <strong>${fmtDate(a.data)}</strong>
-          <button class="btn-del" data-del="${a.id}">×</button>
+          <span class="info">${a.nota ? a.nota : ''}</span>
         </div>
         <div class="info">${matLista}</div>
-        ${a.nota ? `<div class="info"><b>Notă:</b> ${a.nota}</div>` : ''}
+        <div class="btns">
+          <button class="btn-secondary" data-edit-apro="${a.id}">✏️ Editează</button>
+          <button class="btn-del" data-del="${a.id}">Șterge</button>
+        </div>
       `;
       item.querySelector('[data-del]').addEventListener('click', () => {
         if (!confirm('Ștergi aprovizionarea?')) return;
         state.aprovizionari = state.aprovizionari.filter(x => x.id !== a.id);
         save(); renderStoc();
       });
+      item.querySelector('[data-edit-apro]').addEventListener('click', () => incarcaAprovizionarePentruEditare(a.id));
       istCont.appendChild(item);
     });
   }
@@ -928,16 +1008,48 @@ document.getElementById('btnAdaugaApro').addEventListener('click', () => {
   if (Object.keys(materiale).length === 0) { toast('Adaugă cel puțin un material'); return; }
   const dataApro = document.getElementById('aproData').value || todayISO();
   const nota = document.getElementById('aproNota').value.trim();
-  state.aprovizionari.push({
-    id: uid(), data: dataApro, materiale, nota,
-    createdAt: new Date().toISOString(),
-  });
+
+  if (aproEditareId) {
+    const idx = state.aprovizionari.findIndex(x => x.id === aproEditareId);
+    if (idx >= 0) {
+      state.aprovizionari[idx] = {
+        ...state.aprovizionari[idx],
+        data: dataApro, materiale, nota,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    aproEditareId = null;
+    document.getElementById('btnAdaugaApro').textContent = '+ Salvează aprovizionare';
+    toast('Aprovizionare actualizată ✓');
+  } else {
+    state.aprovizionari.push({
+      id: uid(), data: dataApro, materiale, nota,
+      createdAt: new Date().toISOString(),
+    });
+    toast('Aprovizionare salvată ✓');
+  }
+
   document.getElementById('aproNota').value = '';
   document.getElementById('aproData').value = todayISO();
   document.querySelectorAll('.apro-qty').forEach(i => i.value = '');
   save(); renderStoc();
-  toast('Aprovizionare salvată ✓');
 });
+
+function incarcaAprovizionarePentruEditare(id) {
+  const a = state.aprovizionari.find(x => x.id === id);
+  if (!a) return;
+  aproEditareId = id;
+  document.getElementById('aproData').value = a.data;
+  document.getElementById('aproNota').value = a.nota || '';
+  // Resetează și pune valorile
+  document.querySelectorAll('.apro-qty').forEach(inp => {
+    const v = a.materiale[inp.dataset.mat];
+    inp.value = v ? v : '';
+  });
+  document.getElementById('btnAdaugaApro').textContent = '💾 Salvează modificările';
+  toast(`Editezi aprovizionarea din ${fmtDate(a.data)}`);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 
 // ============= CALENDAR =============
 function renderCalendar() {
@@ -1514,6 +1626,7 @@ function renderPersonal() {
   renderMuncitoriActivi();
   renderMuncitoriIstoric();
   renderSumarPrezenta();
+  renderEchipe();
 
   // Start date default azi
   const startInput = document.getElementById('muncitorStart');
@@ -1733,6 +1846,78 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px 10px;border-bottom:1
   w.document.write(html); w.document.close();
 });
 
+// ============= ECHIPE =============
+function renderEchipe() {
+  // Populează selectul de membri
+  const azi = todayISO();
+  const activi = state.muncitori.filter(m => !m.dataEnd || m.dataEnd >= azi);
+  const sel = document.getElementById('echipaMembri');
+  sel.innerHTML = activi.map(m => `<option value="${m.cod}">${m.cod} — ${m.nume}</option>`).join('');
+
+  const lista = document.getElementById('listaEchipe');
+  if (state.echipe.length === 0) {
+    lista.innerHTML = '<div class="empty">Niciuna creată încă</div>';
+    return;
+  }
+  lista.innerHTML = state.echipe.map(e => {
+    const membri = e.codMembri.map(c => {
+      const m = state.muncitori.find(x => x.cod === c);
+      return m ? `${c} ${m.nume}` : c;
+    }).join(', ');
+    return `<div class="raport-item">
+      <div class="head">
+        <strong style="color:${e.culoare}">● ${e.nume}</strong>
+        <span class="info">${e.codMembri.length} membri</span>
+      </div>
+      <div class="info">${membri}</div>
+      <div class="btns">
+        <button class="btn-secondary" data-edit-ech="${e.id}">✏️ Editează</button>
+        <button class="btn-del" data-del-ech="${e.id}">Șterge</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  lista.querySelectorAll('[data-del-ech]').forEach(b => b.addEventListener('click', () => {
+    if (!confirm('Ștergi echipa? Nu afectează rapoartele deja salvate.')) return;
+    state.echipe = state.echipe.filter(x => x.id !== b.dataset.delEch);
+    save(); renderEchipe();
+  }));
+  lista.querySelectorAll('[data-edit-ech]').forEach(b => b.addEventListener('click', () => {
+    const e = state.echipe.find(x => x.id === b.dataset.editEch);
+    if (!e) return;
+    document.getElementById('echipaNume').value = e.nume;
+    document.getElementById('echipaCuloare').value = e.culoare || '#1e40af';
+    const sel = document.getElementById('echipaMembri');
+    Array.from(sel.options).forEach(o => o.selected = e.codMembri.includes(o.value));
+    document.getElementById('formEchipa').dataset.editId = e.id;
+    document.getElementById('formEchipa').querySelector('button[type="submit"]').textContent = '💾 Salvează modificările';
+    toast(`Editezi ${e.nume}`);
+  }));
+}
+
+document.getElementById('formEchipa').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const nume = document.getElementById('echipaNume').value.trim();
+  const culoare = document.getElementById('echipaCuloare').value;
+  const sel = document.getElementById('echipaMembri');
+  const codMembri = Array.from(sel.selectedOptions).map(o => o.value);
+  if (codMembri.length === 0) { toast('Selectează cel puțin un muncitor'); return; }
+
+  const editId = e.target.dataset.editId;
+  if (editId) {
+    const idx = state.echipe.findIndex(x => x.id === editId);
+    if (idx >= 0) state.echipe[idx] = { ...state.echipe[idx], nume, culoare, codMembri };
+    delete e.target.dataset.editId;
+    e.target.querySelector('button[type="submit"]').textContent = 'Salvează echipă';
+  } else {
+    state.echipe.push({ id: uid(), nume, culoare, codMembri });
+  }
+  save(); renderEchipe();
+  e.target.reset();
+  document.getElementById('echipaCuloare').value = '#1e40af';
+  toast('Echipă salvată ✓');
+});
+
 // ============= PRODUCTIVITATE PER ELECTRICIAN-ZI =============
 function renderProductivitate() {
   const cont = document.getElementById('productivitateGrid');
@@ -1803,6 +1988,173 @@ function renderProductivitate() {
   }
 }
 
+// ============= RAPORTURI AUXILIARE (KPI) =============
+function renderRapoarteAuxiliare() {
+  const cont = document.getElementById('rapoarteAuxiliare');
+  if (!cont) return;
+  const data = rapoarteAuxiliarePerTub();
+  if (!data) {
+    cont.innerHTML = '<div class="empty">Niciun consum cu tub încă</div>';
+    return;
+  }
+  const tub20 = state.materiale.find(m => m.id === 'tub20');
+  let html = `<div class="small" style="margin-bottom:8px">Bază calcul: <b>${data.totalTub.toFixed(0)} m</b> tub rigid 20mm consumat istoric</div>`;
+  html += '<div class="prod-grid">';
+  const ordineMat = ['cot20', 'clema20', 'manson20', 'dibluri', 'suruburi'];
+  ordineMat.forEach(id => {
+    const m = state.materiale.find(x => x.id === id);
+    if (!m) return;
+    const ratio = data.ratios[id] || 0;
+    const perM = ratio;
+    const ex100m = ratio * 100;
+    html += `<div class="prod-card">
+      <div class="nume">${m.nume}</div>
+      <div><span class="val-mare">${perM.toFixed(2)}</span><span class="um">${m.um}/m tub</span></div>
+      <div class="recent">
+        <span>La 100m tub: <b>${Math.round(ex100m)} ${m.um}</b></span>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  cont.innerHTML = html;
+}
+
+// ============= PRODUCTIVITATE PER ECHIPĂ =============
+function renderProductivitateEchipe() {
+  const cont = document.getElementById('productivitateEchipe');
+  if (!cont) return;
+  if (state.echipe.length === 0) {
+    cont.innerHTML = '<div class="empty">Definește echipe în tab Personal</div>';
+    return;
+  }
+  // pentru fiecare echipă: m tub / zi-lucrare, m CYYF / zi-lucrare, ap finalizate
+  const perEchipa = {};
+  state.echipe.forEach(e => {
+    perEchipa[e.id] = { nume: e.nume, culoare: e.culoare, zile: new Set(), apsGata: new Set(), apsInLucru: new Set(), mat: {} };
+  });
+  state.rapoarte.forEach(r => {
+    r.alocari.forEach(a => {
+      if (!a.echipaId || !perEchipa[a.echipaId]) return;
+      perEchipa[a.echipaId].zile.add(r.data);
+      if (a.stareNoua === 'gata') perEchipa[a.echipaId].apsGata.add(a.ap);
+      perEchipa[a.echipaId].apsInLucru.add(a.ap);
+      Object.entries(a.materiale || {}).forEach(([k, v]) => {
+        perEchipa[a.echipaId].mat[k] = (perEchipa[a.echipaId].mat[k] || 0) + v;
+      });
+    });
+  });
+
+  const haveData = Object.values(perEchipa).some(e => e.zile.size > 0);
+  if (!haveData) {
+    cont.innerHTML = '<div class="empty">Atribuie echipe în rapoarte (Raport zilnic → alocare apartament)</div>';
+    return;
+  }
+
+  let html = '<div class="prod-grid">';
+  Object.values(perEchipa).forEach(e => {
+    if (e.zile.size === 0) return;
+    const zile = e.zile.size;
+    const tub = e.mat.tub20 || 0;
+    const cyyf = (e.mat.cyyf15 || 0) + (e.mat.cyyf25 || 0) + (e.mat.cyyf4 || 0) + (e.mat.cablu_4x15 || 0);
+    html += `<div class="prod-card" style="border-left-color:${e.culoare}">
+      <div class="nume" style="color:${e.culoare}">● ${e.nume}</div>
+      <div><span class="val-mare">${(tub / zile).toFixed(1)}</span><span class="um">m tub/zi</span></div>
+      <div class="recent">
+        <span>Cablu: ${(cyyf / zile).toFixed(1)} m/zi</span>
+        <span style="font-weight:600">${e.apsGata.size} ap. gata</span>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  cont.innerHTML = html;
+}
+
+// ============= ALERTE STOC =============
+function renderAlerteStoc() {
+  const cont = document.getElementById('alerteStoc');
+  if (!cont) return;
+  const consum = calculeazaConsumTotal();
+  const aprovizionat = calculeazaAprovizionatTotal();
+
+  // Ritm consum: cantitate / zile lucrate ultima săptămână per material
+  const ultimaZi = state.rapoarte.length ? state.rapoarte.map(r => r.data).sort().slice(-1)[0] : todayISO();
+  const d7 = new Date(ultimaZi); d7.setDate(d7.getDate() - 6);
+  const start7 = d7.toISOString().slice(0, 10);
+  const consum7 = {};
+  state.rapoarte.filter(r => r.data >= start7).forEach(r => {
+    Object.entries(r.materiale || {}).forEach(([k, v]) => { consum7[k] = (consum7[k] || 0) + v; });
+  });
+
+  const alerte = [];
+  // ultima aprovizionare per material
+  const ultimaAproPerMat = {};
+  state.aprovizionari.forEach(a => {
+    Object.keys(a.materiale).forEach(k => {
+      if (!ultimaAproPerMat[k] || a.data > ultimaAproPerMat[k]) ultimaAproPerMat[k] = a.data;
+    });
+  });
+
+  state.materiale.forEach(m => {
+    const stoc = (aprovizionat[m.id] || 0) - (consum[m.id] || 0);
+    const ritm = (consum7[m.id] || 0) / 7;
+
+    // Alertă 1: lipsă aprovizionări dar consum exista
+    if ((consum[m.id] || 0) > 0 && !aprovizionat[m.id]) {
+      alerte.push({ tip: 'lipsa_apro', mat: m, mesaj: `Ai consumat ${(consum[m.id]).toFixed(1)}${m.um} dar nu ai înregistrat nicio aprovizionare. Verifică stocul!` });
+    }
+    // Alertă 2: stoc scăzut
+    if (stoc > 0 && ritm > 0) {
+      const zileRamase = stoc / ritm;
+      if (zileRamase < 3) {
+        alerte.push({ tip: 'urgent', mat: m, mesaj: `🔴 SE TERMINĂ în ${zileRamase.toFixed(1)} zile (${stoc.toFixed(1)}${m.um} stoc, ritm ${ritm.toFixed(1)}${m.um}/zi)` });
+      } else if (zileRamase < 7) {
+        alerte.push({ tip: 'avertisment', mat: m, mesaj: `🟡 Atenție: stocul ajunge ~${zileRamase.toFixed(0)} zile (${stoc.toFixed(1)}${m.um})` });
+      }
+    }
+    // Alertă 3: stoc negativ (consumat mai mult decât aprovizionat)
+    if (stoc < 0) {
+      alerte.push({ tip: 'lipsa_apro', mat: m, mesaj: `⚠️ Stoc negativ: ${stoc.toFixed(1)}${m.um}. Probabil n-ai introdus o aprovizionare.` });
+    }
+  });
+
+  if (alerte.length === 0) {
+    cont.innerHTML = '<div style="text-align:center;padding:14px;color:#10b981;font-weight:600">✅ Niciun risc detectat</div>';
+    return;
+  }
+
+  cont.innerHTML = alerte.map(a => {
+    const bg = a.tip === 'urgent' ? '#fee2e2' : (a.tip === 'avertisment' ? '#fef3c7' : '#dbeafe');
+    const colorTxt = a.tip === 'urgent' ? '#991b1b' : (a.tip === 'avertisment' ? '#92400e' : '#1e40af');
+    return `<div style="background:${bg};color:${colorTxt};padding:10px 12px;border-radius:6px;margin-bottom:6px;font-size:13px">
+      <b>${a.mat.nume}</b><br>${a.mesaj}
+    </div>`;
+  }).join('');
+}
+
+// ============= DURATĂ REALĂ PER APARTAMENT (în tab Apartamente, info popup) =============
+function durataApartament(cod) {
+  const evenimente = [];
+  state.rapoarte.slice().sort((a, b) => a.data.localeCompare(b.data)).forEach(r => {
+    r.alocari.forEach(a => {
+      if (a.ap === cod) evenimente.push({ data: r.data, stare: a.stareNoua });
+    });
+  });
+  if (evenimente.length === 0) return null;
+  const start = evenimente[0].data;
+  const ap = state.apartamente.find(x => x.cod === cod);
+  if (!ap) return null;
+  if (ap.stare === 'gata') {
+    const end = evenimente.slice().reverse().find(e => e.stare === 'gata');
+    if (end) {
+      const zile = Math.max(1, Math.round((new Date(end.data) - new Date(start)) / 86400000) + 1);
+      return { start, end: end.data, zile, status: 'finalizat' };
+    }
+  }
+  const azi = todayISO();
+  const zile = Math.max(1, Math.round((new Date(azi) - new Date(start)) / 86400000) + 1);
+  return { start, end: null, zile, status: 'in_lucru' };
+}
+
 // Hook în renderKPI
 const _renderKPI_original = renderKPI;
 renderKPI = function () {
@@ -1810,6 +2162,9 @@ renderKPI = function () {
   renderProgresBar();
   renderDonut();
   renderProductivitate();
+  renderRapoarteAuxiliare();
+  renderProductivitateEchipe();
+  renderAlerteStoc();
   renderChartConsum7();
   renderChartDevieri();
   renderDonutMaterialeTip();
