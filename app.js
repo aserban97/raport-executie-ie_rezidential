@@ -2436,13 +2436,14 @@ function genereazaSituatiePDF(s, isPreview = false) {
       <div style="font-weight:700;font-size:13px;color:#1e40af">${state.firmaNume || 'iFort Systems SRL'}</div>
       <div>${state.firmaAdresa || ''}</div>
       <div><b>CUI:</b> ${state.firmaCUI || ''} &nbsp; <b>ONRC:</b> ${state.firmaONRC || ''}</div>
-      <div><b>IBAN:</b> ${state.firmaIBAN || ''}</div>
+      <div><b>IBAN:</b> <span style="color:#374151;text-decoration:none">${state.firmaIBAN || ''}</span></div>
     </div>`;
   const previewBadge = isPreview ? '<div style="background:#fef3c7;color:#92400e;padding:8px 12px;border-radius:6px;margin-bottom:14px;font-size:13px;text-align:center"><b>PREVIEW</b> — Această situație NU este înregistrată oficial</div>' : '';
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Situatie lucrari nr ${s.nr}</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="format-detection" content="telephone=no, date=no, address=no, email=no"><meta name="x-apple-disable-message-reformatting"><title>Situatie lucrari nr ${s.nr}</title>
 <style>
 *{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
+a,a:link,a:visited{color:inherit !important;text-decoration:none !important;cursor:default}
 .page{background:white;padding:35px;max-width:780px;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1)}
 .header{display:flex;align-items:center;gap:18px;border-bottom:3px solid #1e40af;padding-bottom:12px;margin-bottom:18px}
 .header .logo{width:80px}.header-text .company{font-size:22px;font-weight:700;color:#1e40af}.header-text .sub{font-size:13px;color:#6b7280}
@@ -2601,7 +2602,7 @@ function genereazaSituatieInternPDF() {
     return `<tr><td style="font-size:12px">${stareLetra} <b>${cod}</b></td><td style="font-size:11px;color:#6b7280">${tip}</td>${celule}</tr>`;
   }).join('');
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Situatie INTERN ${fmtDate(dataEnd)}</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="format-detection" content="telephone=no, date=no, address=no, email=no"><title>Situatie INTERN ${fmtDate(dataEnd)}</title>
 <style>
 *{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
 .page{background:white;padding:35px;max-width:900px;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1)}
