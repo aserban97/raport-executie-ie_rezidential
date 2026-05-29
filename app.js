@@ -2488,7 +2488,7 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
   <div class="header" style="align-items:flex-start"><img src="logo.png" class="logo" />${antetFirma}</div>
 
   <div class="title">SITUAȚIE DE LUCRĂRI nr. ${nrSituatie} / ${fmtDate(s.data)}</div>
-  <div class="subtitle">Instalații electrice apartamente</div>
+  <div class="subtitle">Lucrări executate — instalații electrice apartamente</div>
 
   <div class="info-grid">
     <div><b>Beneficiar:</b> ${beneficiar}</div>
@@ -2497,9 +2497,10 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
     <div style="grid-column:1/-1"><b>Perioada:</b> ${fmtDate(s.dataStart)} — ${fmtDate(s.dataEnd)}</div>
   </div>
 
+  <h3 style="font-size:14px;color:#1e40af;margin-top:8px;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:4px">Cantități executate de iFort Systems SRL în perioada raportată</h3>
   <table>
     <thead>
-      <tr><th style="width:50px;text-align:center">Nr.</th><th>Denumire</th><th style="width:60px;text-align:center">UM</th><th style="width:120px;text-align:right">Cantitate</th></tr>
+      <tr><th style="width:50px;text-align:center">Nr.</th><th>Denumire material</th><th style="width:60px;text-align:center">UM</th><th style="width:140px;text-align:right">Cantitate executată</th></tr>
     </thead>
     <tbody>${tableRows}</tbody>
   </table>
@@ -2644,9 +2645,9 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600}
     <div style="grid-column:1/-1"><b>Perioada:</b> ${fmtDate(dataStart)} — ${fmtDate(dataEnd)}</div>
   </div>
 
-  <h2>1. Total cantități executate</h2>
+  <h2>1. Total cantități executate de iFort Systems SRL</h2>
   <table>
-    <thead><tr><th style="width:50px;text-align:center">Nr.</th><th>Denumire</th><th style="width:60px;text-align:center">UM</th><th style="width:120px;text-align:right">Cantitate</th></tr></thead>
+    <thead><tr><th style="width:50px;text-align:center">Nr.</th><th>Denumire material</th><th style="width:60px;text-align:center">UM</th><th style="width:140px;text-align:right">Cantitate executată</th></tr></thead>
     <tbody>${tableRows}</tbody>
   </table>
 
