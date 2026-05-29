@@ -4,13 +4,14 @@
 const STORAGE_KEY = 'ifort_raport_ie_v1';
 
 const MATERIALE_DEFAULT = [
-  { id: 'tub20', nume: 'Tub rigid 20mm', um: 'm' },
+  { id: 'tub20', nume: 'Tub PVC D20 IPEY', um: 'm' },
   { id: 'cot20', nume: 'Cot 90° 20mm', um: 'buc' },
   { id: 'clema20', nume: 'Clemă 20mm', um: 'buc' },
   { id: 'manson20', nume: 'Manșon 20mm', um: 'buc' },
-  { id: 'cyyf15', nume: 'CYYF 3x1.5', um: 'm' },
-  { id: 'cyyf25', nume: 'CYYF 3x2.5', um: 'm' },
-  { id: 'cyyf4', nume: 'CYYF 3x4', um: 'm' },
+  { id: 'cyyf15', nume: 'Cablu CYYF 3x1.5 mmp', um: 'm' },
+  { id: 'cyyf25', nume: 'Cablu CYYF 3x2.5 mmp', um: 'm' },
+  { id: 'cyyf4', nume: 'Cablu CYYF 3x4 mmp', um: 'm' },
+  { id: 'cyyf6', nume: 'Cablu CYYF 3x6 mmp', um: 'm' },
   { id: 'cablu_4x15', nume: 'CYYF 4x1.5', um: 'm' },
   { id: 'dibluri', nume: 'Dibluri', um: 'buc' },
   { id: 'suruburi', nume: 'Șuruburi', um: 'buc' },
@@ -28,6 +29,7 @@ let state = {
   muncitori: [], // [{ id, cod, nume, dataStart, dataEnd (null=activ) }]
   prezenta: [], // [{ data, cod, ore }]
   echipe: [], // [{ id, nume, codMembri: ['001','002'], culoare }]
+  situatiiLucrari: [], // [{ id, nr, data, dataStart, dataEnd, cantitati: {tub20: 1234, cyyf15: 567, ...}, createdAt }]
   contorBackup: 0, // câte rapoarte de la ultimul backup auto
 };
 
@@ -86,6 +88,7 @@ document.querySelectorAll('.tab').forEach(btn => {
     if (btn.dataset.tab === 'calendar') renderCalendar();
     if (btn.dataset.tab === 'stoc') renderStoc();
     if (btn.dataset.tab === 'personal') renderPersonal();
+    if (btn.dataset.tab === 'situatii') renderSituatii();
     if (btn.dataset.tab === 'kpi') renderKPI();
     if (btn.dataset.tab === 'setari') renderSetari();
   });
@@ -2180,6 +2183,478 @@ function durataApartament(cod) {
   const zile = Math.max(1, Math.round((new Date(azi) - new Date(start)) / 86400000) + 1);
   return { start, end: null, zile, status: 'in_lucru' };
 }
+
+// ============= SITUAȚII DE LUCRĂRI =============
+// Materialele care apar în Situații (NUMAI tub + cabluri, ordine fixă)
+const MATERIALE_SITUATIE = ['cyyf15', 'cyyf25', 'cyyf4', 'cyyf6', 'cablu_4x15', 'tub20'];
+
+function calculeazaCantitatiInterval(startISO, endISO) {
+  const cantitati = {};
+  state.rapoarte.forEach(r => {
+    if (r.data < startISO || r.data > endISO) return;
+    r.alocari.forEach(a => {
+      Object.entries(a.materiale || {}).forEach(([k, v]) => {
+        if (!MATERIALE_SITUATIE.includes(k)) return;
+        cantitati[k] = (cantitati[k] || 0) + v;
+      });
+    });
+  });
+  return cantitati;
+}
+
+function dataStartProiect() {
+  // prima zi din rapoarte (totul cumulat de la început)
+  const dates = state.rapoarte.map(r => r.data).sort();
+  return dates[0] || todayISO();
+}
+
+function dataEndProiect() {
+  // ultima zi raportată
+  const dates = state.rapoarte.map(r => r.data).sort();
+  return dates[dates.length - 1] || todayISO();
+}
+
+// Apartamente finalizate / în lucru până la dataEnd (din rapoarte)
+function statusApartamenteLaData(endISO) {
+  const stareLaData = {}; // cod -> ultima stare cronologică ≤ endISO
+  state.rapoarte.slice().sort((a, b) => a.data.localeCompare(b.data)).forEach(r => {
+    if (r.data > endISO) return;
+    r.alocari.forEach(a => {
+      if (a.stareNoua) stareLaData[a.ap] = a.stareNoua;
+    });
+  });
+  const finalizate = Object.entries(stareLaData).filter(([, s]) => s === 'gata').map(([c]) => c).sort();
+  const inLucru = Object.entries(stareLaData).filter(([, s]) => s === 'in_lucru' || s === 'blocat').map(([c]) => c).sort();
+  return { finalizate, inLucru };
+}
+
+function renderSituatii() {
+  const dataStart = dataStartProiect();
+  const dataEnd = dataEndProiect();
+  document.getElementById('sitDataEnd').textContent = fmtDate(dataEnd);
+
+  // Preview tabel
+  const cant = calculeazaCantitatiInterval(dataStart, dataEnd);
+  const prev = document.getElementById('sitPreview');
+  // Doar liniile cu cantitate > 0
+  const linii = MATERIALE_SITUATIE
+    .map(id => ({ id, mat: state.materiale.find(m => m.id === id), val: cant[id] || 0 }))
+    .filter(x => x.mat && x.val > 0);
+
+  if (linii.length === 0) {
+    prev.innerHTML = '<div class="empty">Nimic de raportat în acest interval</div>';
+  } else {
+    let html = '<table style="width:100%;border-collapse:collapse;margin-top:10px"><thead><tr><th style="text-align:left;padding:8px;border-bottom:1px solid #e5e7eb;font-size:12px">Nr.</th><th style="text-align:left;padding:8px;border-bottom:1px solid #e5e7eb;font-size:12px">Denumire</th><th style="text-align:center;padding:8px;border-bottom:1px solid #e5e7eb;font-size:12px">UM</th><th style="text-align:right;padding:8px;border-bottom:1px solid #e5e7eb;font-size:12px">Cantitate</th></tr></thead><tbody>';
+    linii.forEach((l, i) => {
+      html += `<tr><td style="padding:8px;border-bottom:1px solid #f3f4f6">${i + 1}</td><td style="padding:8px;border-bottom:1px solid #f3f4f6">${l.mat.nume}</td><td style="text-align:center;padding:8px;border-bottom:1px solid #f3f4f6">${l.mat.um}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #f3f4f6;font-weight:700;color:#1e40af">${l.val.toFixed(2)}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    prev.innerHTML = html;
+  }
+
+  // Istoric
+  const ist = document.getElementById('istoricSituatii');
+  if (state.situatiiLucrari.length === 0) {
+    ist.innerHTML = '<div class="empty">Nicio situație generată încă</div>';
+  } else {
+    ist.innerHTML = '';
+    state.situatiiLucrari.slice().reverse().forEach(s => {
+      const item = document.createElement('div');
+      item.className = 'raport-item';
+      const totaluri = Object.entries(s.cantitati).map(([k, v]) => {
+        const m = state.materiale.find(x => x.id === k);
+        return m ? `${m.nume.replace('Cablu ', '').replace(' mmp', '')}: ${v.toFixed(0)}${m.um}` : '';
+      }).filter(Boolean).join(' • ');
+      item.innerHTML = `
+        <div class="head">
+          <strong>Situație nr. ${s.nr}</strong>
+          <span class="info">${fmtDate(s.dataStart)} → ${fmtDate(s.dataEnd)}</span>
+        </div>
+        <div class="info">${totaluri}</div>
+        <div class="btns">
+          <button class="btn-secondary" data-sit-pdf="${s.id}">📄 PDF</button>
+          <button class="btn-secondary" data-sit-excel="${s.id}">📊 Excel</button>
+          <button class="btn-del" data-sit-del="${s.id}">Șterge</button>
+        </div>
+      `;
+      item.querySelector('[data-sit-pdf]').addEventListener('click', () => genereazaSituatiePDF(s));
+      item.querySelector('[data-sit-excel]').addEventListener('click', () => genereazaSituatieExcel(s));
+      item.querySelector('[data-sit-del]').addEventListener('click', () => {
+        if (!confirm(`Ștergi situația nr. ${s.nr}? Vei pierde înregistrarea oficială.`)) return;
+        state.situatiiLucrari = state.situatiiLucrari.filter(x => x.id !== s.id);
+        // Renumerotare
+        state.situatiiLucrari.forEach((x, i) => { x.nr = i + 1; });
+        save(); renderSituatii();
+      });
+      ist.appendChild(item);
+    });
+  }
+}
+
+function construiesteSituatieObj() {
+  const dataStart = dataStartProiect();
+  const dataEnd = dataEndProiect();
+  const cantitati = calculeazaCantitatiInterval(dataStart, dataEnd);
+  Object.keys(cantitati).forEach(k => { if (cantitati[k] === 0) delete cantitati[k]; });
+  const { finalizate, inLucru } = statusApartamenteLaData(dataEnd);
+  const nr = state.situatiiLucrari.length + 1;
+  return {
+    id: uid(), nr, data: todayISO(), dataStart, dataEnd, cantitati,
+    finalizate, inLucru,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+// Detaliu cantități per apartament (pentru intern)
+function calculeazaCantitatiPerAp(startISO, endISO) {
+  const perAp = {}; // cod -> { mat: {tub20: x, cyyf15: y} }
+  state.rapoarte.forEach(r => {
+    if (r.data < startISO || r.data > endISO) return;
+    r.alocari.forEach(a => {
+      if (!perAp[a.ap]) perAp[a.ap] = {};
+      Object.entries(a.materiale || {}).forEach(([k, v]) => {
+        if (!MATERIALE_SITUATIE.includes(k)) return;
+        perAp[a.ap][k] = (perAp[a.ap][k] || 0) + v;
+      });
+    });
+  });
+  return perAp;
+}
+
+// Resurse umane cumulate
+function calculeazaResurseInterval(startISO, endISO) {
+  let persoaneZile = 0, electricieniZile = 0, sefiZile = 0;
+  state.rapoarte.forEach(r => {
+    if (r.data < startISO || r.data > endISO) return;
+    persoaneZile += r.nrPersoane || 0;
+    electricieniZile += r.nrElectricieni || 0;
+    sefiZile += r.nrSefi || 0;
+  });
+  const oreTotal = state.prezenta
+    .filter(p => p.data >= startISO && p.data <= endISO)
+    .reduce((s, p) => s + (p.ore || 0), 0);
+  return { persoaneZile, electricieniZile, sefiZile, oreTotal };
+}
+
+document.getElementById('btnSitGenereaza').addEventListener('click', () => {
+  const s = construiesteSituatieObj();
+  if (Object.keys(s.cantitati).length === 0) {
+    toast('Nimic de raportat în acest interval');
+    return;
+  }
+  if (!confirm(`Generezi Situația de lucrări nr. ${s.nr} (${fmtDate(s.dataStart)} → ${fmtDate(s.dataEnd)})?\n\nDupă confirmare, intervalul următoarei situații va începe din ${fmtDate(s.dataEnd)} + 1 zi.`)) return;
+  state.situatiiLucrari.push(s);
+  save();
+  renderSituatii();
+  genereazaSituatiePDF(s);
+  toast('Situație înregistrată ✓');
+});
+
+document.getElementById('btnSitPreviewPDF').addEventListener('click', () => {
+  const s = construiesteSituatieObj();
+  if (Object.keys(s.cantitati).length === 0) {
+    toast('Nimic de raportat în acest interval');
+    return;
+  }
+  genereazaSituatiePDF(s, true);
+});
+
+document.getElementById('btnSitExcel').addEventListener('click', () => {
+  const s = construiesteSituatieObj();
+  if (Object.keys(s.cantitati).length === 0) {
+    toast('Nimic de raportat în acest interval');
+    return;
+  }
+  genereazaSituatieExcel(s, true);
+});
+
+function genereazaSituatiePDF(s, isPreview = false) {
+  const linii = MATERIALE_SITUATIE
+    .map(id => ({ id, mat: state.materiale.find(m => m.id === id), val: s.cantitati[id] || 0 }))
+    .filter(x => x.mat && x.val > 0);
+
+  const tableRows = linii.map((l, i) =>
+    `<tr><td style="text-align:center">${i + 1}</td><td>${l.mat.nume}</td><td style="text-align:center">${l.mat.um}</td><td style="text-align:right;font-weight:700">${l.val.toFixed(2)}</td></tr>`
+  ).join('');
+
+  const antreprenor = state.antreprenor || 'KESZ';
+  const santier = state.santier || 'Corallis';
+  const previewBadge = isPreview ? '<div style="background:#fef3c7;color:#92400e;padding:8px 12px;border-radius:6px;margin-bottom:14px;font-size:13px;text-align:center"><b>PREVIEW</b> — Această situație NU este înregistrată oficial</div>' : '';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Situatie lucrari nr ${s.nr}</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
+.page{background:white;padding:35px;max-width:780px;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1)}
+.header{display:flex;align-items:center;gap:18px;border-bottom:3px solid #1e40af;padding-bottom:12px;margin-bottom:18px}
+.header .logo{width:80px}.header-text .company{font-size:22px;font-weight:700;color:#1e40af}.header-text .sub{font-size:13px;color:#6b7280}
+.title{font-size:20px;font-weight:700;text-align:center;margin:18px 0 6px;color:#1e40af}
+.subtitle{font-size:13px;color:#6b7280;text-align:center;margin-bottom:22px}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;background:#f9fafb;padding:14px;border-radius:8px;margin-bottom:18px;font-size:14px}
+.info-grid b{color:#1e40af}
+table{width:100%;border-collapse:collapse;margin:10px 0 20px}
+th,td{padding:10px 12px;border:1px solid #d1d5db;font-size:14px}
+th{background:#1e40af;color:white;text-align:left;font-weight:600}
+tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
+.semnaturi{margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:60px}
+.semnaturi .sem{text-align:center}
+.semnaturi .sem-titlu{font-weight:600;margin-bottom:60px;font-size:13px}
+.semnaturi .sem-linie{border-top:1px solid #6b7280;padding-top:6px;font-size:12px;color:#6b7280}
+.footer{margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center}
+.no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;z-index:100}
+@media print{body{background:white}.page{margin:0;box-shadow:none}.no-print{display:none}}
+</style></head><body>
+<button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
+<div class="page">
+  ${previewBadge}
+  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">iFort Systems S.R.L.</div><div class="sub">Instalații electrice — Document oficial</div></div></div>
+
+  <div class="title">SITUAȚIE DE LUCRĂRI nr. ${s.nr} / ${fmtDate(s.data)}</div>
+  <div class="subtitle">Instalații electrice apartamente — distribuție</div>
+
+  <div class="info-grid">
+    <div><b>Beneficiar:</b> ${antreprenor}</div>
+    <div><b>Executant:</b> iFort Systems S.R.L.</div>
+    <div><b>Șantier:</b> ${santier}</div>
+    <div><b>Perioada:</b> ${fmtDate(s.dataStart)} — ${fmtDate(s.dataEnd)}</div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th style="width:50px;text-align:center">Nr.</th><th>Denumire</th><th style="width:60px;text-align:center">UM</th><th style="width:120px;text-align:right">Cantitate</th></tr>
+    </thead>
+    <tbody>${tableRows}</tbody>
+  </table>
+
+  <h3 style="font-size:14px;color:#1e40af;margin-top:18px;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:4px">Apartamente finalizate (${(s.finalizate || []).length})</h3>
+  <p style="font-size:13px;line-height:1.7;margin:6px 0">${(s.finalizate || []).length > 0 ? s.finalizate.join(', ') : '<i style="color:#9ca3af">Niciun apartament finalizat</i>'}</p>
+
+  <h3 style="font-size:14px;color:#92400e;margin-top:14px;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:4px">Apartamente în lucru (${(s.inLucru || []).length})</h3>
+  <p style="font-size:13px;line-height:1.7;margin:6px 0">${(s.inLucru || []).length > 0 ? s.inLucru.join(', ') : '<i style="color:#9ca3af">Niciun apartament în lucru</i>'}</p>
+
+  <div class="semnaturi">
+    <div class="sem">
+      <div class="sem-titlu">EXECUTANT<br>iFort Systems S.R.L.</div>
+      <div class="sem-linie">Semnătură / Ștampilă</div>
+    </div>
+    <div class="sem">
+      <div class="sem-titlu">BENEFICIAR<br>${antreprenor}</div>
+      <div class="sem-linie">Semnătură / Ștampilă</div>
+    </div>
+  </div>
+
+  <div class="footer">Document generat — iFort Systems S.R.L. — ${fmtDate(s.data)}</div>
+</div>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html); w.document.close();
+}
+
+function genereazaSituatieExcel(s, isPreview = false) {
+  const linii = MATERIALE_SITUATIE
+    .map(id => ({ id, mat: state.materiale.find(m => m.id === id), val: s.cantitati[id] || 0 }))
+    .filter(x => x.mat && x.val > 0);
+
+  const antreprenor = state.antreprenor || 'KESZ';
+  const santier = state.santier || 'Corallis';
+
+  // Format CSV cu BOM pentru Excel (caractere RO)
+  let csv = '﻿';
+  csv += `Situație de lucrări nr. ${s.nr} / ${fmtDate(s.data)}\n`;
+  csv += `Beneficiar:,${antreprenor}\n`;
+  csv += `Executant:,iFort Systems S.R.L.\n`;
+  csv += `Șantier:,${santier}\n`;
+  csv += `Perioada:,${fmtDate(s.dataStart)} - ${fmtDate(s.dataEnd)}\n`;
+  csv += `\n`;
+  csv += `Nr.,Denumire,UM,Cantitate\n`;
+  linii.forEach((l, i) => {
+    csv += `${i + 1},"${l.mat.nume}",${l.mat.um},${l.val.toFixed(2)}\n`;
+  });
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const suffix = isPreview ? '-preview' : '';
+  a.href = url; a.download = `situatie-lucrari-nr-${s.nr}${suffix}-${s.data}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Excel descărcat ✓');
+}
+
+// ============= SITUAȚIE INTERN =============
+function genereazaSituatieInternPDF() {
+  const dataStart = dataStartProiect();
+  const dataEnd = dataEndProiect();
+  if (state.rapoarte.length === 0) { toast('Niciun raport pentru situație'); return; }
+  const cantitati = calculeazaCantitatiInterval(dataStart, dataEnd);
+  const { finalizate, inLucru } = statusApartamenteLaData(dataEnd);
+  const perAp = calculeazaCantitatiPerAp(dataStart, dataEnd);
+  const resurse = calculeazaResurseInterval(dataStart, dataEnd);
+  const antreprenor = state.antreprenor || 'KESZ';
+  const santier = state.santier || 'Corallis';
+
+  const linii = MATERIALE_SITUATIE
+    .map(id => ({ id, mat: state.materiale.find(m => m.id === id), val: cantitati[id] || 0 }))
+    .filter(x => x.mat && x.val > 0);
+
+  const tableRows = linii.map((l, i) =>
+    `<tr><td style="text-align:center">${i + 1}</td><td>${l.mat.nume}</td><td style="text-align:center">${l.mat.um}</td><td style="text-align:right;font-weight:700">${l.val.toFixed(2)}</td></tr>`
+  ).join('');
+
+  // Tabel detaliu per apartament
+  const materialeUtilizate = MATERIALE_SITUATIE.filter(id => cantitati[id] > 0);
+  const headerDetaliuMat = materialeUtilizate.map(id => {
+    const m = state.materiale.find(x => x.id === id);
+    return `<th style="text-align:right;font-size:11px">${m ? m.nume.replace('Cablu ', '').replace(' mmp', '').replace('Tub PVC ', '') : id}</th>`;
+  }).join('');
+  const codSortati = Object.keys(perAp).sort();
+  const detaliuRows = codSortati.map(cod => {
+    const ap = state.apartamente.find(x => x.cod === cod);
+    const tip = ap ? ap.tip : '—';
+    const stareLetra = finalizate.includes(cod) ? '🟢' : (inLucru.includes(cod) ? '🟡' : '⚪');
+    const celule = materialeUtilizate.map(id => {
+      const v = perAp[cod][id] || 0;
+      return `<td style="text-align:right;font-size:12px">${v > 0 ? v.toFixed(1) : '—'}</td>`;
+    }).join('');
+    return `<tr><td style="font-size:12px">${stareLetra} <b>${cod}</b></td><td style="font-size:11px;color:#6b7280">${tip}</td>${celule}</tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Situatie INTERN ${fmtDate(dataEnd)}</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
+.page{background:white;padding:35px;max-width:900px;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1)}
+.header{display:flex;align-items:center;gap:18px;border-bottom:3px solid #1e40af;padding-bottom:12px;margin-bottom:18px}
+.header .logo{width:80px}.header-text .company{font-size:22px;font-weight:700;color:#1e40af}.header-text .sub{font-size:13px;color:#6b7280}
+.intern-badge{background:#fee2e2;color:#991b1b;padding:6px 14px;border-radius:6px;font-weight:600;font-size:13px;text-align:center;margin-bottom:14px;display:inline-block}
+.title{font-size:20px;font-weight:700;text-align:center;margin:10px 0 6px;color:#1e40af}
+.subtitle{font-size:13px;color:#6b7280;text-align:center;margin-bottom:18px}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;background:#f9fafb;padding:14px;border-radius:8px;margin-bottom:18px;font-size:14px}
+.info-grid b{color:#1e40af}
+h2{font-size:14px;color:#1e40af;margin-top:22px;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:4px}
+table{width:100%;border-collapse:collapse;margin:8px 0 14px}
+th,td{padding:8px 10px;border:1px solid #d1d5db;font-size:13px}
+th{background:#1e40af;color:white;text-align:left;font-weight:600}
+.lista-ap{font-size:13px;line-height:1.7;margin:6px 0}
+.footer{margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center}
+.no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;z-index:100}
+@media print{body{background:white}.page{margin:0;box-shadow:none}.no-print{display:none}}
+</style></head><body>
+<button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
+<div class="page">
+  <div class="intern-badge">🔒 DOCUMENT INTERN — NU PENTRU BENEFICIAR</div>
+  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">iFort Systems S.R.L.</div><div class="sub">Situație lucrări — Document de arhivă firmă</div></div></div>
+
+  <div class="title">SITUAȚIE INTERNĂ DE LUCRĂRI</div>
+  <div class="subtitle">Generată: ${fmtDate(todayISO())}</div>
+
+  <div class="info-grid">
+    <div><b>Beneficiar:</b> ${antreprenor}</div>
+    <div><b>Executant:</b> iFort Systems S.R.L.</div>
+    <div><b>Șantier:</b> ${santier}</div>
+    <div><b>Perioada:</b> ${fmtDate(dataStart)} — ${fmtDate(dataEnd)}</div>
+  </div>
+
+  <h2>1. Total cantități executate</h2>
+  <table>
+    <thead><tr><th style="width:50px;text-align:center">Nr.</th><th>Denumire</th><th style="width:60px;text-align:center">UM</th><th style="width:120px;text-align:right">Cantitate</th></tr></thead>
+    <tbody>${tableRows}</tbody>
+  </table>
+
+  <h2>2. Detaliu cantități per apartament</h2>
+  <table>
+    <thead><tr><th style="font-size:11px">Apartament</th><th style="font-size:11px">Tip</th>${headerDetaliuMat}</tr></thead>
+    <tbody>${detaliuRows || `<tr><td colspan="${materialeUtilizate.length + 2}" style="text-align:center;color:#9ca3af">Niciun detaliu</td></tr>`}</tbody>
+  </table>
+  <p class="small" style="font-size:11px;color:#6b7280">🟢 Finalizat • 🟡 În lucru • ⚪ Alt status</p>
+
+  <h2>3. Apartamente finalizate (${finalizate.length})</h2>
+  <p class="lista-ap">${finalizate.length > 0 ? finalizate.join(', ') : '<i style="color:#9ca3af">Niciunul</i>'}</p>
+
+  <h2>4. Apartamente în lucru (${inLucru.length})</h2>
+  <p class="lista-ap">${inLucru.length > 0 ? inLucru.join(', ') : '<i style="color:#9ca3af">Niciunul</i>'}</p>
+
+  <h2>5. Resurse umane cumulate</h2>
+  <table>
+    <thead><tr><th>Indicator</th><th style="text-align:right;width:160px">Valoare</th></tr></thead>
+    <tbody>
+      <tr><td>Persoane-zile (total)</td><td style="text-align:right;font-weight:700">${resurse.persoaneZile}</td></tr>
+      <tr><td>din care Electricieni-zile</td><td style="text-align:right;font-weight:700">${resurse.electricieniZile}</td></tr>
+      <tr><td>din care Șefi de echipă-zile</td><td style="text-align:right;font-weight:700">${resurse.sefiZile}</td></tr>
+      <tr><td>Ore pontaj total</td><td style="text-align:right;font-weight:700">${resurse.oreTotal.toFixed(1)} h</td></tr>
+    </tbody>
+  </table>
+
+  <div class="footer">Document intern — iFort Systems S.R.L. — ${fmtDate(todayISO())}</div>
+</div>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html); w.document.close();
+}
+
+function genereazaSituatieInternExcel() {
+  const dataStart = dataStartProiect();
+  const dataEnd = dataEndProiect();
+  if (state.rapoarte.length === 0) { toast('Niciun raport pentru situație'); return; }
+  const cantitati = calculeazaCantitatiInterval(dataStart, dataEnd);
+  const { finalizate, inLucru } = statusApartamenteLaData(dataEnd);
+  const perAp = calculeazaCantitatiPerAp(dataStart, dataEnd);
+  const resurse = calculeazaResurseInterval(dataStart, dataEnd);
+  const antreprenor = state.antreprenor || 'KESZ';
+  const santier = state.santier || 'Corallis';
+
+  let csv = '﻿';
+  csv += `SITUAȚIE INTERNĂ DE LUCRĂRI\n`;
+  csv += `Beneficiar:,${antreprenor}\n`;
+  csv += `Executant:,iFort Systems S.R.L.\n`;
+  csv += `Șantier:,${santier}\n`;
+  csv += `Perioada:,${fmtDate(dataStart)} - ${fmtDate(dataEnd)}\n\n`;
+
+  csv += `1. Total cantitati executate\n`;
+  csv += `Nr.,Denumire,UM,Cantitate\n`;
+  const linii = MATERIALE_SITUATIE
+    .map(id => ({ id, mat: state.materiale.find(m => m.id === id), val: cantitati[id] || 0 }))
+    .filter(x => x.mat && x.val > 0);
+  linii.forEach((l, i) => csv += `${i + 1},"${l.mat.nume}",${l.mat.um},${l.val.toFixed(2)}\n`);
+  csv += `\n`;
+
+  csv += `2. Detaliu per apartament\n`;
+  const matUtil = MATERIALE_SITUATIE.filter(id => cantitati[id] > 0);
+  csv += `Apartament,Tip,Stare,${matUtil.map(id => {
+    const m = state.materiale.find(x => x.id === id);
+    return `"${m.nume} (${m.um})"`;
+  }).join(',')}\n`;
+  Object.keys(perAp).sort().forEach(cod => {
+    const ap = state.apartamente.find(x => x.cod === cod);
+    const stare = finalizate.includes(cod) ? 'Finalizat' : (inLucru.includes(cod) ? 'In lucru' : 'Alta');
+    const celule = matUtil.map(id => (perAp[cod][id] || 0).toFixed(2)).join(',');
+    csv += `"${cod}","${ap ? ap.tip : '-'}",${stare},${celule}\n`;
+  });
+  csv += `\n`;
+
+  csv += `3. Apartamente finalizate (${finalizate.length})\n`;
+  csv += `"${finalizate.join(', ')}"\n\n`;
+
+  csv += `4. Apartamente in lucru (${inLucru.length})\n`;
+  csv += `"${inLucru.join(', ')}"\n\n`;
+
+  csv += `5. Resurse umane cumulate\n`;
+  csv += `Persoane-zile total,${resurse.persoaneZile}\n`;
+  csv += `Electricieni-zile,${resurse.electricieniZile}\n`;
+  csv += `Sefi de echipa-zile,${resurse.sefiZile}\n`;
+  csv += `Ore pontaj total,${resurse.oreTotal.toFixed(1)}\n`;
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `situatie-INTERN-${dataEnd}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Excel intern descărcat ✓');
+}
+
+document.getElementById('btnSitInternPDF').addEventListener('click', genereazaSituatieInternPDF);
+document.getElementById('btnSitInternExcel').addEventListener('click', genereazaSituatieInternExcel);
 
 // ============= KPI NOI v15 =============
 

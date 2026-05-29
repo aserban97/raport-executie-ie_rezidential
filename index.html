@@ -26,6 +26,7 @@
     <button class="tab" data-tab="stoc">Stoc</button>
     <button class="tab" data-tab="personal">Personal</button>
     <button class="tab" data-tab="kpi">KPI</button>
+    <button class="tab" data-tab="situatii">Situații</button>
     <button class="tab" data-tab="setari">Setări</button>
   </nav>
 
@@ -412,6 +413,42 @@
 
       <h3>Trend ultimele 7 zile</h3>
       <div id="kpiTrend" class="card"></div>
+    </section>
+
+    <!-- TAB: SITUATII DE LUCRARI -->
+    <section id="tab-situatii" class="tab-panel">
+      <h2>Situații de lucrări</h2>
+
+      <div class="card">
+        <h3>📄 EXTERN — pentru beneficiar (KESZ)</h3>
+        <p class="small">
+          Cantități totale cumulate de la <b>începutul proiectului</b> până la
+          <b id="sitDataEnd">ultima zi raportată</b>.
+          Include lista apartamentelor finalizate și în lucru (fără cantități per apartament).
+        </p>
+        <div id="sitPreview"></div>
+        <div class="actions" style="margin-top:12px">
+          <button type="button" class="btn-primary" id="btnSitGenereaza">📄 Generează situație oficială (extern)</button>
+          <button type="button" class="btn-secondary" id="btnSitPreviewPDF">👁️ Preview PDF extern</button>
+          <button type="button" class="btn-secondary" id="btnSitExcel">📊 Excel extern</button>
+        </div>
+        <p class="small" style="margin-top:8px"><b>Oficial</b> = înregistrează situația cu nr. și marchează data. <b>Preview</b> = doar vezi.</p>
+      </div>
+
+      <div class="card">
+        <h3>🔒 INTERN — pentru firmă (arhivă)</h3>
+        <p class="small">
+          Aceleași date ca externul + detaliu cantități per apartament + resurse umane cumulate.
+          Nu se înregistrează ca situație oficială.
+        </p>
+        <div class="actions">
+          <button type="button" class="btn-secondary" id="btnSitInternPDF">🔒 PDF intern</button>
+          <button type="button" class="btn-secondary" id="btnSitInternExcel">📊 Excel intern</button>
+        </div>
+      </div>
+
+      <h3>Istoric situații generate</h3>
+      <div id="istoricSituatii" class="card"></div>
     </section>
 
     <!-- TAB: SETARI -->
