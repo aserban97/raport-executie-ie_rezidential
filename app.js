@@ -2460,7 +2460,26 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
 .semnaturi .sem-linie{border-top:1px solid #6b7280;padding-top:6px;font-size:12px;color:#6b7280}
 .footer{margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center}
 .no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;z-index:100}
-@media print{body{background:white}.page{margin:0;box-shadow:none}.no-print{display:none}}
+@media print{
+  @page{size:A4 portrait;margin:10mm}
+  html,body{background:white;width:210mm;height:auto}
+  body{margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .page{margin:0;padding:0;box-shadow:none;max-width:100%;width:100%;page-break-after:avoid;page-break-inside:avoid}
+  .no-print{display:none}
+  .header{padding-bottom:6px;margin-bottom:8px}
+  .header .logo{width:55px}
+  .title{font-size:16px;margin:6px 0 2px}
+  .subtitle{font-size:11px;margin-bottom:8px}
+  .info-grid{padding:8px 10px;margin-bottom:10px;font-size:11px;gap:4px 14px}
+  table{margin:4px 0 8px}
+  th,td{padding:4px 8px;font-size:11px}
+  h3{font-size:12px;margin-top:8px;margin-bottom:3px}
+  p{font-size:11px;line-height:1.4;margin:3px 0}
+  .semnaturi{margin-top:14px;gap:30px}
+  .semnaturi .sem-titlu{margin-bottom:30px;font-size:11px}
+  .semnaturi .sem-linie{font-size:10px;padding-top:3px}
+  .footer{margin-top:10px;padding-top:6px;font-size:9px}
+}
 </style></head><body>
 <button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
 <div class="page">
