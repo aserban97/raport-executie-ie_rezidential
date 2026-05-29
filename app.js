@@ -12,7 +12,7 @@ const MATERIALE_DEFAULT = [
   { id: 'cyyf25', nume: 'Cablu CYYF 3x2.5 mmp', um: 'm' },
   { id: 'cyyf4', nume: 'Cablu CYYF 3x4 mmp', um: 'm' },
   { id: 'cyyf6', nume: 'Cablu CYYF 3x6 mmp', um: 'm' },
-  { id: 'cablu_4x15', nume: 'CYYF 4x1.5', um: 'm' },
+  { id: 'cablu_4x15', nume: 'Cablu CYYF 4x1.5 mmp', um: 'm' },
   { id: 'dibluri', nume: 'Dibluri', um: 'buc' },
   { id: 'suruburi', nume: 'Șuruburi', um: 'buc' },
 ];
@@ -32,6 +32,13 @@ let state = {
   situatiiLucrari: [], // [{ id, nr, data, dataStart, dataEnd, cantitati: {tub20: 1234, cyyf15: 567, ...}, createdAt }]
   beneficiar: 'Kesz Electric SRL',
   adresaObiectiv: 'Str. Coralilor, nr 83-87, Sector 1, București',
+  firmaNume: 'iFort Systems SRL',
+  firmaAdresa: 'B-vd Timișoara nr.80B, Sector 6, București',
+  firmaCUI: 'RO300072700',
+  firmaONRC: 'J40/4325/2012',
+  firmaIBAN: 'RO29 UGBI 0000 1720 2515 2RON',
+  contractInfo: '', // ex: "Contract nr. 123 / 01.01.2026"
+  prefixSituatie: 'SL-2026-', // pentru numerotare
   contorBackup: 0, // câte rapoarte de la ultimul backup auto
 };
 
@@ -53,6 +60,12 @@ function load() {
   // Defaults pentru câmpuri noi (utilizatori existenți)
   if (!state.beneficiar) state.beneficiar = 'Kesz Electric SRL';
   if (!state.adresaObiectiv) state.adresaObiectiv = 'Str. Coralilor, nr 83-87, Sector 1, București';
+  if (!state.firmaNume) state.firmaNume = 'iFort Systems SRL';
+  if (!state.firmaAdresa) state.firmaAdresa = 'B-vd Timișoara nr.80B, Sector 6, București';
+  if (!state.firmaCUI) state.firmaCUI = 'RO300072700';
+  if (!state.firmaONRC) state.firmaONRC = 'J40/4325/2012';
+  if (!state.firmaIBAN) state.firmaIBAN = 'RO29 UGBI 0000 1720 2515 2RON';
+  if (!state.prefixSituatie) state.prefixSituatie = 'SL-2026-';
   // Migrare: adaugă materiale default lipsă + actualizează denumirile la cele default
   MATERIALE_DEFAULT.forEach(def => {
     const existing = state.materiale.find(m => m.id === def.id);
@@ -796,6 +809,12 @@ function renderSetari() {
   document.getElementById('antreprenor').value = state.antreprenor || 'KESZ';
   document.getElementById('adresaObiectiv').value = state.adresaObiectiv || 'Str. Coralilor, nr 83-87, Sector 1, București';
   document.getElementById('santier').value = state.santier || 'Corallis';
+  document.getElementById('firmaNume').value = state.firmaNume || 'iFort Systems SRL';
+  document.getElementById('firmaAdresa').value = state.firmaAdresa || 'B-vd Timișoara nr.80B, Sector 6, București';
+  document.getElementById('firmaCUI').value = state.firmaCUI || 'RO300072700';
+  document.getElementById('firmaONRC').value = state.firmaONRC || 'J40/4325/2012';
+  document.getElementById('firmaIBAN').value = state.firmaIBAN || 'RO29 UGBI 0000 1720 2515 2RON';
+  document.getElementById('prefixSituatie').value = state.prefixSituatie || 'SL-2026-';
   const cont = document.getElementById('listaMaterialeAdmin');
   cont.innerHTML = '';
   state.materiale.forEach((m, i) => {
@@ -831,6 +850,17 @@ document.getElementById('btnSaveProiect').addEventListener('click', () => {
   state.santier = document.getElementById('santier').value.trim() || 'Corallis';
   save();
   toast('Date proiect salvate ✓');
+});
+
+document.getElementById('btnSaveFirma').addEventListener('click', () => {
+  state.firmaNume = document.getElementById('firmaNume').value.trim();
+  state.firmaAdresa = document.getElementById('firmaAdresa').value.trim();
+  state.firmaCUI = document.getElementById('firmaCUI').value.trim();
+  state.firmaONRC = document.getElementById('firmaONRC').value.trim();
+  state.firmaIBAN = document.getElementById('firmaIBAN').value.trim();
+  state.prefixSituatie = document.getElementById('prefixSituatie').value.trim() || 'SL-2026-';
+  save();
+  toast('Date firmă salvate ✓');
 });
 
 document.getElementById('btnExportJSON').addEventListener('click', () => {
@@ -2274,9 +2304,10 @@ function renderSituatii() {
         const m = state.materiale.find(x => x.id === k);
         return m ? `${m.nume.replace('Cablu ', '').replace(' mmp', '')}: ${v.toFixed(0)}${m.um}` : '';
       }).filter(Boolean).join(' • ');
+      const nrAfisat = `${state.prefixSituatie || 'SL-2026-'}${String(s.nr).padStart(3, '0')}`;
       item.innerHTML = `
         <div class="head">
-          <strong>Situație nr. ${s.nr}</strong>
+          <strong>Situație ${nrAfisat}</strong>
           <span class="info">${fmtDate(s.dataStart)} → ${fmtDate(s.dataEnd)}</span>
         </div>
         <div class="info">${totaluri}</div>
@@ -2351,7 +2382,8 @@ document.getElementById('btnSitGenereaza').addEventListener('click', () => {
     toast('Nimic de raportat în acest interval');
     return;
   }
-  if (!confirm(`Generezi Situația de lucrări nr. ${s.nr} (${fmtDate(s.dataStart)} → ${fmtDate(s.dataEnd)})?\n\nDupă confirmare, intervalul următoarei situații va începe din ${fmtDate(s.dataEnd)} + 1 zi.`)) return;
+  const nrAfisat = `${state.prefixSituatie || 'SL-2026-'}${String(s.nr).padStart(3, '0')}`;
+  if (!confirm(`Generezi Situația de lucrări ${nrAfisat} (${fmtDate(s.dataStart)} → ${fmtDate(s.dataEnd)})?\n\nIntervalul include toate datele de la începutul proiectului până la ultima zi raportată.`)) return;
   state.situatiiLucrari.push(s);
   save();
   renderSituatii();
@@ -2388,6 +2420,14 @@ function genereazaSituatiePDF(s, isPreview = false) {
 
   const beneficiar = state.beneficiar || 'Kesz Electric SRL';
   const adresa = state.adresaObiectiv || 'Str. Coralilor, nr 83-87, Sector 1, București';
+  const nrSituatie = `${state.prefixSituatie || 'SL-2026-'}${String(s.nr).padStart(3, '0')}`;
+  const antetFirma = `
+    <div style="font-size:11px;line-height:1.5;color:#374151;margin-bottom:10px">
+      <div style="font-weight:700;font-size:13px;color:#1e40af">${state.firmaNume || 'iFort Systems SRL'}</div>
+      <div>${state.firmaAdresa || ''}</div>
+      <div><b>CUI:</b> ${state.firmaCUI || ''} &nbsp; <b>ONRC:</b> ${state.firmaONRC || ''}</div>
+      <div><b>IBAN:</b> ${state.firmaIBAN || ''}</div>
+    </div>`;
   const previewBadge = isPreview ? '<div style="background:#fef3c7;color:#92400e;padding:8px 12px;border-radius:6px;margin-bottom:14px;font-size:13px;text-align:center"><b>PREVIEW</b> — Această situație NU este înregistrată oficial</div>' : '';
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Situatie lucrari nr ${s.nr}</title>
@@ -2415,9 +2455,9 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
 <button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
 <div class="page">
   ${previewBadge}
-  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">iFort Systems S.R.L.</div><div class="sub">Instalații electrice</div></div></div>
+  <div class="header" style="align-items:flex-start"><img src="logo.png" class="logo" />${antetFirma}</div>
 
-  <div class="title">SITUAȚIE DE LUCRĂRI nr. ${s.nr} / ${fmtDate(s.data)}</div>
+  <div class="title">SITUAȚIE DE LUCRĂRI nr. ${nrSituatie} / ${fmtDate(s.data)}</div>
   <div class="subtitle">Instalații electrice apartamente — distribuție</div>
 
   <div class="info-grid">
@@ -2442,7 +2482,7 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
 
   <div class="semnaturi">
     <div class="sem">
-      <div class="sem-titlu">EXECUTANT<br>iFort Systems S.R.L.</div>
+      <div class="sem-titlu">EXECUTANT<br>${state.firmaNume || 'iFort Systems SRL'}</div>
       <div class="sem-linie">Semnătură / Ștampilă</div>
     </div>
     <div class="sem">
@@ -2451,7 +2491,7 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
     </div>
   </div>
 
-  <div class="footer">Document generat — iFort Systems S.R.L. — ${fmtDate(s.data)}</div>
+  <div class="footer">Document generat — ${state.firmaNume || 'iFort Systems SRL'} — ${fmtDate(s.data)}</div>
 </div>
 </body></html>`;
 
@@ -2466,12 +2506,16 @@ function genereazaSituatieExcel(s, isPreview = false) {
 
   const beneficiar = state.beneficiar || 'Kesz Electric SRL';
   const adresa = state.adresaObiectiv || 'Str. Coralilor, nr 83-87, Sector 1, București';
+  const nrSit = `${state.prefixSituatie || 'SL-2026-'}${String(s.nr).padStart(3, '0')}`;
 
   // Format CSV cu BOM pentru Excel (caractere RO)
   let csv = '﻿';
-  csv += `Situație de lucrări nr. ${s.nr} / ${fmtDate(s.data)}\n`;
+  csv += `Situație de lucrări nr. ${nrSit} / ${fmtDate(s.data)}\n`;
+  csv += `Executant:,"${state.firmaNume || 'iFort Systems SRL'}"\n`;
+  csv += `Adresa executant:,"${state.firmaAdresa || ''}"\n`;
+  csv += `CUI:,${state.firmaCUI || ''},ONRC:,${state.firmaONRC || ''}\n`;
+  csv += `IBAN:,${state.firmaIBAN || ''}\n`;
   csv += `Beneficiar:,"${beneficiar}"\n`;
-  csv += `Executant:,iFort Systems S.R.L.\n`;
   csv += `Adresa obiectiv:,"${adresa}"\n`;
   csv += `Perioada:,${fmtDate(s.dataStart)} - ${fmtDate(s.dataEnd)}\n`;
   csv += `\n`;
@@ -2551,7 +2595,14 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600}
 <button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
 <div class="page">
   <div class="intern-badge">🔒 DOCUMENT INTERN — NU PENTRU BENEFICIAR</div>
-  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">iFort Systems S.R.L.</div><div class="sub">Situație lucrări — arhivă firmă</div></div></div>
+  <div class="header" style="align-items:flex-start"><img src="logo.png" class="logo" />
+    <div style="font-size:11px;line-height:1.5;color:#374151">
+      <div style="font-weight:700;font-size:13px;color:#1e40af">${state.firmaNume || 'iFort Systems SRL'}</div>
+      <div>${state.firmaAdresa || ''}</div>
+      <div><b>CUI:</b> ${state.firmaCUI || ''} &nbsp; <b>ONRC:</b> ${state.firmaONRC || ''}</div>
+      <div><b>IBAN:</b> ${state.firmaIBAN || ''}</div>
+    </div>
+  </div>
 
   <div class="title">SITUAȚIE INTERNĂ DE LUCRĂRI</div>
   <div class="subtitle">Generată: ${fmtDate(todayISO())}</div>
@@ -2593,7 +2644,7 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600}
     </tbody>
   </table>
 
-  <div class="footer">Document intern — iFort Systems S.R.L. — ${fmtDate(todayISO())}</div>
+  <div class="footer">Document intern — ${state.firmaNume || 'iFort Systems SRL'} — ${fmtDate(todayISO())}</div>
 </div>
 </body></html>`;
 
@@ -2614,8 +2665,11 @@ function genereazaSituatieInternExcel() {
 
   let csv = '﻿';
   csv += `SITUAȚIE INTERNĂ DE LUCRĂRI\n`;
+  csv += `Executant:,"${state.firmaNume || 'iFort Systems SRL'}"\n`;
+  csv += `Adresa executant:,"${state.firmaAdresa || ''}"\n`;
+  csv += `CUI:,${state.firmaCUI || ''},ONRC:,${state.firmaONRC || ''}\n`;
+  csv += `IBAN:,${state.firmaIBAN || ''}\n`;
   csv += `Beneficiar:,"${beneficiar}"\n`;
-  csv += `Executant:,iFort Systems S.R.L.\n`;
   csv += `Adresa obiectiv:,"${adresa}"\n`;
   csv += `Perioada:,${fmtDate(dataStart)} - ${fmtDate(dataEnd)}\n\n`;
 

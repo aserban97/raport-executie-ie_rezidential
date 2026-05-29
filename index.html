@@ -500,6 +500,40 @@
       </div>
 
       <div class="card">
+        <h3>Date firmă executant</h3>
+        <p class="small">Apar în antetul documentelor oficiale (Situații de lucrări).</p>
+        <label>
+          Denumire firmă
+          <input type="text" id="firmaNume" />
+        </label>
+        <label>
+          Adresă firmă
+          <input type="text" id="firmaAdresa" />
+        </label>
+        <div class="row">
+          <label>
+            CUI
+            <input type="text" id="firmaCUI" />
+          </label>
+          <label>
+            Nr. ONRC
+            <input type="text" id="firmaONRC" />
+          </label>
+        </div>
+        <label>
+          IBAN
+          <input type="text" id="firmaIBAN" />
+        </label>
+        <div class="row">
+          <label>
+            Prefix numerotare situații (ex: SL-2026-)
+            <input type="text" id="prefixSituatie" />
+          </label>
+        </div>
+        <button type="button" class="btn-primary" id="btnSaveFirma">Salvează</button>
+      </div>
+
+      <div class="card">
         <h3>Rapoarte arhivă (doar pentru tine)</h3>
         <div class="actions">
           <button type="button" class="btn-primary" id="btnRapSaptamana">📅 PDF săptămâna curentă</button>
