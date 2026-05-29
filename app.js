@@ -72,11 +72,21 @@ function load() {
     if (!existing) {
       state.materiale.push({ ...def });
     } else {
-      // Actualizează denumirea și UM dacă s-au schimbat în default (păstrează istoricul prin ID)
+      // FORȚEAZĂ update denumire și UM (sursa adevărului = MATERIALE_DEFAULT)
       existing.nume = def.nume;
       existing.um = def.um;
     }
   });
+  // Migrare defensivă pentru materiale custom (cabluri adăugate manual cu denumiri vechi)
+  state.materiale.forEach(m => {
+    if (MATERIALE_DEFAULT.some(d => d.id === m.id)) return;
+    // Dacă denumirea începe cu "CYYF " (fără "Cablu") → adaugă prefix și sufix
+    if (/^CYYF\s/i.test(m.nume) && !/^Cablu/i.test(m.nume)) {
+      const needsSuffix = !/mmp\s*$/i.test(m.nume);
+      m.nume = 'Cablu ' + m.nume + (needsSuffix ? ' mmp' : '');
+    }
+  });
+  save();
 }
 function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
@@ -3110,6 +3120,17 @@ function init() {
   // Service worker (PWA)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
+    // Auto-reload când SW se actualizează
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'SW_UPDATED') {
+        console.log('SW updated to', e.data.version, '- reloading');
+        setTimeout(() => location.reload(), 500);
+      }
+    });
+    // Verifică update la fiecare focus pe tab
+    navigator.serviceWorker.ready.then(reg => {
+      window.addEventListener('focus', () => reg.update());
+    });
   }
 }
 
