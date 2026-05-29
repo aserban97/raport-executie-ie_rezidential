@@ -30,6 +30,8 @@ let state = {
   prezenta: [], // [{ data, cod, ore }]
   echipe: [], // [{ id, nume, codMembri: ['001','002'], culoare }]
   situatiiLucrari: [], // [{ id, nr, data, dataStart, dataEnd, cantitati: {tub20: 1234, cyyf15: 567, ...}, createdAt }]
+  beneficiar: 'Kesz Electric SRL',
+  adresaObiectiv: 'Str. Coralilor, nr 83-87, Sector 1, București',
   contorBackup: 0, // câte rapoarte de la ultimul backup auto
 };
 
@@ -48,6 +50,9 @@ function load() {
     }
   } catch (e) { console.error('Load error', e); }
   if (!state.materiale || state.materiale.length === 0) state.materiale = [...MATERIALE_DEFAULT];
+  // Defaults pentru câmpuri noi (utilizatori existenți)
+  if (!state.beneficiar) state.beneficiar = 'Kesz Electric SRL';
+  if (!state.adresaObiectiv) state.adresaObiectiv = 'Str. Coralilor, nr 83-87, Sector 1, București';
   // Migrare: adaugă materiale default lipsă + actualizează denumirile la cele default
   MATERIALE_DEFAULT.forEach(def => {
     const existing = state.materiale.find(m => m.id === def.id);
@@ -787,7 +792,9 @@ function renderKPI() {
 
 // ============= Setări =============
 function renderSetari() {
+  document.getElementById('beneficiar').value = state.beneficiar || 'Kesz Electric SRL';
   document.getElementById('antreprenor').value = state.antreprenor || 'KESZ';
+  document.getElementById('adresaObiectiv').value = state.adresaObiectiv || 'Str. Coralilor, nr 83-87, Sector 1, București';
   document.getElementById('santier').value = state.santier || 'Corallis';
   const cont = document.getElementById('listaMaterialeAdmin');
   cont.innerHTML = '';
@@ -818,7 +825,9 @@ document.getElementById('formMaterial').addEventListener('submit', (e) => {
 });
 
 document.getElementById('btnSaveProiect').addEventListener('click', () => {
+  state.beneficiar = document.getElementById('beneficiar').value.trim() || 'Kesz Electric SRL';
   state.antreprenor = document.getElementById('antreprenor').value.trim() || 'KESZ';
+  state.adresaObiectiv = document.getElementById('adresaObiectiv').value.trim() || 'Str. Coralilor, nr 83-87, Sector 1, București';
   state.santier = document.getElementById('santier').value.trim() || 'Corallis';
   save();
   toast('Date proiect salvate ✓');
@@ -2377,8 +2386,8 @@ function genereazaSituatiePDF(s, isPreview = false) {
     `<tr><td style="text-align:center">${i + 1}</td><td>${l.mat.nume}</td><td style="text-align:center">${l.mat.um}</td><td style="text-align:right;font-weight:700">${l.val.toFixed(2)}</td></tr>`
   ).join('');
 
-  const antreprenor = state.antreprenor || 'KESZ';
-  const santier = state.santier || 'Corallis';
+  const beneficiar = state.beneficiar || 'Kesz Electric SRL';
+  const adresa = state.adresaObiectiv || 'Str. Coralilor, nr 83-87, Sector 1, București';
   const previewBadge = isPreview ? '<div style="background:#fef3c7;color:#92400e;padding:8px 12px;border-radius:6px;margin-bottom:14px;font-size:13px;text-align:center"><b>PREVIEW</b> — Această situație NU este înregistrată oficial</div>' : '';
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Situatie lucrari nr ${s.nr}</title>
@@ -2406,16 +2415,16 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
 <button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
 <div class="page">
   ${previewBadge}
-  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">iFort Systems S.R.L.</div><div class="sub">Instalații electrice — Document oficial</div></div></div>
+  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">iFort Systems S.R.L.</div><div class="sub">Instalații electrice</div></div></div>
 
   <div class="title">SITUAȚIE DE LUCRĂRI nr. ${s.nr} / ${fmtDate(s.data)}</div>
   <div class="subtitle">Instalații electrice apartamente — distribuție</div>
 
   <div class="info-grid">
-    <div><b>Beneficiar:</b> ${antreprenor}</div>
+    <div><b>Beneficiar:</b> ${beneficiar}</div>
     <div><b>Executant:</b> iFort Systems S.R.L.</div>
-    <div><b>Șantier:</b> ${santier}</div>
-    <div><b>Perioada:</b> ${fmtDate(s.dataStart)} — ${fmtDate(s.dataEnd)}</div>
+    <div style="grid-column:1/-1"><b>Adresa obiectiv:</b> ${adresa}</div>
+    <div style="grid-column:1/-1"><b>Perioada:</b> ${fmtDate(s.dataStart)} — ${fmtDate(s.dataEnd)}</div>
   </div>
 
   <table>
@@ -2437,7 +2446,7 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
       <div class="sem-linie">Semnătură / Ștampilă</div>
     </div>
     <div class="sem">
-      <div class="sem-titlu">BENEFICIAR<br>${antreprenor}</div>
+      <div class="sem-titlu">BENEFICIAR<br>${beneficiar}</div>
       <div class="sem-linie">Semnătură / Ștampilă</div>
     </div>
   </div>
@@ -2455,15 +2464,15 @@ function genereazaSituatieExcel(s, isPreview = false) {
     .map(id => ({ id, mat: state.materiale.find(m => m.id === id), val: s.cantitati[id] || 0 }))
     .filter(x => x.mat && x.val > 0);
 
-  const antreprenor = state.antreprenor || 'KESZ';
-  const santier = state.santier || 'Corallis';
+  const beneficiar = state.beneficiar || 'Kesz Electric SRL';
+  const adresa = state.adresaObiectiv || 'Str. Coralilor, nr 83-87, Sector 1, București';
 
   // Format CSV cu BOM pentru Excel (caractere RO)
   let csv = '﻿';
   csv += `Situație de lucrări nr. ${s.nr} / ${fmtDate(s.data)}\n`;
-  csv += `Beneficiar:,${antreprenor}\n`;
+  csv += `Beneficiar:,"${beneficiar}"\n`;
   csv += `Executant:,iFort Systems S.R.L.\n`;
-  csv += `Șantier:,${santier}\n`;
+  csv += `Adresa obiectiv:,"${adresa}"\n`;
   csv += `Perioada:,${fmtDate(s.dataStart)} - ${fmtDate(s.dataEnd)}\n`;
   csv += `\n`;
   csv += `Nr.,Denumire,UM,Cantitate\n`;
@@ -2490,8 +2499,8 @@ function genereazaSituatieInternPDF() {
   const { finalizate, inLucru } = statusApartamenteLaData(dataEnd);
   const perAp = calculeazaCantitatiPerAp(dataStart, dataEnd);
   const resurse = calculeazaResurseInterval(dataStart, dataEnd);
-  const antreprenor = state.antreprenor || 'KESZ';
-  const santier = state.santier || 'Corallis';
+  const beneficiar = state.beneficiar || 'Kesz Electric SRL';
+  const adresa = state.adresaObiectiv || 'Str. Coralilor, nr 83-87, Sector 1, București';
 
   const linii = MATERIALE_SITUATIE
     .map(id => ({ id, mat: state.materiale.find(m => m.id === id), val: cantitati[id] || 0 }))
@@ -2542,16 +2551,16 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600}
 <button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
 <div class="page">
   <div class="intern-badge">🔒 DOCUMENT INTERN — NU PENTRU BENEFICIAR</div>
-  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">iFort Systems S.R.L.</div><div class="sub">Situație lucrări — Document de arhivă firmă</div></div></div>
+  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">iFort Systems S.R.L.</div><div class="sub">Situație lucrări — arhivă firmă</div></div></div>
 
   <div class="title">SITUAȚIE INTERNĂ DE LUCRĂRI</div>
   <div class="subtitle">Generată: ${fmtDate(todayISO())}</div>
 
   <div class="info-grid">
-    <div><b>Beneficiar:</b> ${antreprenor}</div>
+    <div><b>Beneficiar:</b> ${beneficiar}</div>
     <div><b>Executant:</b> iFort Systems S.R.L.</div>
-    <div><b>Șantier:</b> ${santier}</div>
-    <div><b>Perioada:</b> ${fmtDate(dataStart)} — ${fmtDate(dataEnd)}</div>
+    <div style="grid-column:1/-1"><b>Adresa obiectiv:</b> ${adresa}</div>
+    <div style="grid-column:1/-1"><b>Perioada:</b> ${fmtDate(dataStart)} — ${fmtDate(dataEnd)}</div>
   </div>
 
   <h2>1. Total cantități executate</h2>
@@ -2600,14 +2609,14 @@ function genereazaSituatieInternExcel() {
   const { finalizate, inLucru } = statusApartamenteLaData(dataEnd);
   const perAp = calculeazaCantitatiPerAp(dataStart, dataEnd);
   const resurse = calculeazaResurseInterval(dataStart, dataEnd);
-  const antreprenor = state.antreprenor || 'KESZ';
-  const santier = state.santier || 'Corallis';
+  const beneficiar = state.beneficiar || 'Kesz Electric SRL';
+  const adresa = state.adresaObiectiv || 'Str. Coralilor, nr 83-87, Sector 1, București';
 
   let csv = '﻿';
   csv += `SITUAȚIE INTERNĂ DE LUCRĂRI\n`;
-  csv += `Beneficiar:,${antreprenor}\n`;
+  csv += `Beneficiar:,"${beneficiar}"\n`;
   csv += `Executant:,iFort Systems S.R.L.\n`;
-  csv += `Șantier:,${santier}\n`;
+  csv += `Adresa obiectiv:,"${adresa}"\n`;
   csv += `Perioada:,${fmtDate(dataStart)} - ${fmtDate(dataEnd)}\n\n`;
 
   csv += `1. Total cantitati executate\n`;
