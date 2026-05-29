@@ -2295,7 +2295,7 @@ function renderSituatii() {
   } else {
     let html = '<table style="width:100%;border-collapse:collapse;margin-top:10px"><thead><tr><th style="text-align:left;padding:8px;border-bottom:1px solid #e5e7eb;font-size:12px">Nr.</th><th style="text-align:left;padding:8px;border-bottom:1px solid #e5e7eb;font-size:12px">Denumire</th><th style="text-align:center;padding:8px;border-bottom:1px solid #e5e7eb;font-size:12px">UM</th><th style="text-align:right;padding:8px;border-bottom:1px solid #e5e7eb;font-size:12px">Cantitate</th></tr></thead><tbody>';
     linii.forEach((l, i) => {
-      html += `<tr><td style="padding:8px;border-bottom:1px solid #f3f4f6">${i + 1}</td><td style="padding:8px;border-bottom:1px solid #f3f4f6">${l.mat.nume}</td><td style="text-align:center;padding:8px;border-bottom:1px solid #f3f4f6">${l.mat.um}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #f3f4f6;font-weight:700;color:#1e40af">${l.val.toFixed(2)}</td></tr>`;
+      html += `<tr><td style="padding:8px;border-bottom:1px solid #f3f4f6">${i + 1}</td><td style="padding:8px;border-bottom:1px solid #f3f4f6">${l.mat.nume}</td><td style="text-align:center;padding:8px;border-bottom:1px solid #f3f4f6">${l.mat.um}</td><td style="text-align:right;padding:8px;border-bottom:1px solid #f3f4f6;font-weight:700;color:#1e40af">${Math.round(l.val)}</td></tr>`;
     });
     html += '</tbody></table>';
     prev.innerHTML = html;
@@ -2425,7 +2425,7 @@ function genereazaSituatiePDF(s, isPreview = false) {
     .filter(x => x.mat && x.val > 0);
 
   const tableRows = linii.map((l, i) =>
-    `<tr><td style="text-align:center">${i + 1}</td><td>${l.mat.nume}</td><td style="text-align:center">${l.mat.um}</td><td style="text-align:right;font-weight:700">${l.val.toFixed(2)}</td></tr>`
+    `<tr><td style="text-align:center">${i + 1}</td><td>${l.mat.nume}</td><td style="text-align:center">${l.mat.um}</td><td style="text-align:right;font-weight:700">${Math.round(l.val)}</td></tr>`
   ).join('');
 
   const beneficiar = state.beneficiar || 'Kesz Electric SRL';
@@ -2468,7 +2468,7 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
   <div class="header" style="align-items:flex-start"><img src="logo.png" class="logo" />${antetFirma}</div>
 
   <div class="title">SITUAȚIE DE LUCRĂRI nr. ${nrSituatie} / ${fmtDate(s.data)}</div>
-  <div class="subtitle">Instalații electrice apartamente — distribuție</div>
+  <div class="subtitle">Instalații electrice apartamente</div>
 
   <div class="info-grid">
     <div><b>Beneficiar:</b> ${beneficiar}</div>
@@ -2531,7 +2531,7 @@ function genereazaSituatieExcel(s, isPreview = false) {
   csv += `\n`;
   csv += `Nr.,Denumire,UM,Cantitate\n`;
   linii.forEach((l, i) => {
-    csv += `${i + 1},"${l.mat.nume}",${l.mat.um},${l.val.toFixed(2)}\n`;
+    csv += `${i + 1},"${l.mat.nume}",${l.mat.um},${Math.round(l.val)}\n`;
   });
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -2561,7 +2561,7 @@ function genereazaSituatieInternPDF() {
     .filter(x => x.mat && x.val > 0);
 
   const tableRows = linii.map((l, i) =>
-    `<tr><td style="text-align:center">${i + 1}</td><td>${l.mat.nume}</td><td style="text-align:center">${l.mat.um}</td><td style="text-align:right;font-weight:700">${l.val.toFixed(2)}</td></tr>`
+    `<tr><td style="text-align:center">${i + 1}</td><td>${l.mat.nume}</td><td style="text-align:center">${l.mat.um}</td><td style="text-align:right;font-weight:700">${Math.round(l.val)}</td></tr>`
   ).join('');
 
   // Tabel detaliu per apartament
@@ -2688,7 +2688,7 @@ function genereazaSituatieInternExcel() {
   const linii = MATERIALE_SITUATIE
     .map(id => ({ id, mat: state.materiale.find(m => m.id === id), val: cantitati[id] || 0 }))
     .filter(x => x.mat && x.val > 0);
-  linii.forEach((l, i) => csv += `${i + 1},"${l.mat.nume}",${l.mat.um},${l.val.toFixed(2)}\n`);
+  linii.forEach((l, i) => csv += `${i + 1},"${l.mat.nume}",${l.mat.um},${Math.round(l.val)}\n`);
   csv += `\n`;
 
   csv += `2. Detaliu per apartament\n`;
