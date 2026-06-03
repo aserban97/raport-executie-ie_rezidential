@@ -117,6 +117,7 @@ document.querySelectorAll('.tab').forEach(btn => {
     if (btn.dataset.tab === 'stoc') renderStoc();
     if (btn.dataset.tab === 'personal') renderPersonal();
     if (btn.dataset.tab === 'situatii') renderSituatii();
+    if (btn.dataset.tab === 'analiza') renderAnaliza();
     if (btn.dataset.tab === 'kpi') renderKPI();
     if (btn.dataset.tab === 'setari') renderSetari();
   });
@@ -2803,6 +2804,427 @@ function genereazaSituatieInternExcel() {
 
 document.getElementById('btnSitInternPDF').addEventListener('click', genereazaSituatieInternPDF);
 document.getElementById('btnSitInternExcel').addEventListener('click', genereazaSituatieInternExcel);
+
+// ============= ANALIZĂ — Dashboard focusat =============
+let analizaPerioada = { start: null, end: null };
+
+function setPerioadaAnaliza(tip) {
+  const azi = todayISO();
+  if (tip === 'ultima-situatie') {
+    if (state.situatiiLucrari.length > 0) {
+      const u = state.situatiiLucrari[state.situatiiLucrari.length - 1];
+      analizaPerioada = { start: u.dataStart, end: u.dataEnd };
+    } else {
+      analizaPerioada = { start: dataStartProiect(), end: dataEndProiect() };
+    }
+  } else if (tip === 'tot') {
+    analizaPerioada = { start: dataStartProiect(), end: dataEndProiect() };
+  } else if (tip === 'saptamana') {
+    const d = new Date(azi); d.setDate(d.getDate() - 6);
+    analizaPerioada = { start: d.toISOString().slice(0, 10), end: azi };
+  } else if (tip === 'luna') {
+    const d = new Date(azi); d.setMonth(d.getMonth() - 1);
+    analizaPerioada = { start: d.toISOString().slice(0, 10), end: azi };
+  }
+  document.getElementById('analizaStart').value = analizaPerioada.start;
+  document.getElementById('analizaEnd').value = analizaPerioada.end;
+}
+
+function renderAnaliza() {
+  // Default = ultima situație
+  if (!analizaPerioada.start) setPerioadaAnaliza('ultima-situatie');
+
+  const s = document.getElementById('analizaStart').value || analizaPerioada.start;
+  const e = document.getElementById('analizaEnd').value || analizaPerioada.end;
+  analizaPerioada = { start: s, end: e };
+
+  document.getElementById('analizaInfoPerioada').innerHTML =
+    `Perioadă selectată: <b>${fmtDate(s)} — ${fmtDate(e)}</b>`;
+
+  renderAnalizaCifre(s, e);
+  renderAnalizaGrafic(s, e);
+  renderAnalizaTabelZilnic(s, e);
+  renderAnalizaApartamente(s, e);
+  renderAnalizaTipuri(s, e);
+}
+
+document.querySelectorAll('[data-perioada]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    setPerioadaAnaliza(btn.dataset.perioada);
+    renderAnaliza();
+  });
+});
+document.getElementById('analizaStart').addEventListener('change', renderAnaliza);
+document.getElementById('analizaEnd').addEventListener('change', renderAnaliza);
+
+function colectDateAnaliza(startISO, endISO) {
+  // Returnează agregare completă pentru perioada dată
+  const perZi = {}; // data -> { tub, cablu, electricieni, persoane, sefi, ap: Set }
+  const perApart = {}; // cod -> { tub, cablu, oameni, zile: Set }
+  let totalTub = 0, totalCablu = 0, totalEl = 0, totalPers = 0, totalSefi = 0;
+  const apsAtinse = new Set(), apsFinalizate = new Set(), apsStartate = new Set();
+
+  state.rapoarte.forEach(r => {
+    if (r.data < startISO || r.data > endISO) return;
+    if (!perZi[r.data]) perZi[r.data] = { tub: 0, cablu: 0, electricieni: 0, persoane: 0, sefi: 0, ap: new Set() };
+    perZi[r.data].electricieni += r.nrElectricieni || 0;
+    perZi[r.data].persoane += r.nrPersoane || 0;
+    perZi[r.data].sefi += r.nrSefi || 0;
+    totalEl += r.nrElectricieni || 0;
+    totalPers += r.nrPersoane || 0;
+    totalSefi += r.nrSefi || 0;
+
+    r.alocari.forEach(a => {
+      apsAtinse.add(a.ap);
+      perZi[r.data].ap.add(a.ap);
+      if (a.stareNoua === 'gata') apsFinalizate.add(a.ap);
+      if (!perApart[a.ap]) perApart[a.ap] = { tub: 0, cablu: 0, oameni: 0, zile: new Set(), stareFinala: null };
+      perApart[a.ap].oameni += a.oameni || 0;
+      perApart[a.ap].zile.add(r.data);
+      if (a.stareNoua) perApart[a.ap].stareFinala = a.stareNoua;
+      Object.entries(a.materiale || {}).forEach(([k, v]) => {
+        if (k === 'tub20') { perZi[r.data].tub += v; totalTub += v; perApart[a.ap].tub += v; }
+        else if (k.startsWith('cyyf') || k === 'cablu_4x15') { perZi[r.data].cablu += v; totalCablu += v; perApart[a.ap].cablu += v; }
+      });
+    });
+  });
+
+  // Ore pontaj în perioadă
+  const orePontaj = state.prezenta
+    .filter(p => p.data >= startISO && p.data <= endISO)
+    .reduce((s, p) => s + (p.ore || 0), 0);
+
+  return { perZi, perApart, totalTub, totalCablu, totalEl, totalPers, totalSefi, orePontaj, apsAtinse, apsFinalizate };
+}
+
+function renderAnalizaCifre(startISO, endISO) {
+  const cont = document.getElementById('analizaCifre');
+  const d = colectDateAnaliza(startISO, endISO);
+  const zile = Object.keys(d.perZi).length;
+  if (zile === 0) { cont.innerHTML = '<div class="empty">Niciun raport în perioadă</div>'; return; }
+
+  const tubMed = d.totalEl ? (d.totalTub / d.totalEl) : 0;
+  const cabluMed = d.totalEl ? (d.totalCablu / d.totalEl) : 0;
+  const mPerOra = d.orePontaj ? ((d.totalTub + d.totalCablu) / d.orePontaj) : 0;
+
+  cont.innerHTML = `
+    <div class="prod-card" style="border-left-color:#1e40af"><div class="nume">Tub total</div><div><span class="val-mare">${Math.round(d.totalTub)}</span><span class="um">m</span></div><div class="recent"><span>${tubMed.toFixed(1)} m/electrician-zi</span></div></div>
+    <div class="prod-card" style="border-left-color:#10b981"><div class="nume">Cabluri total</div><div><span class="val-mare">${Math.round(d.totalCablu)}</span><span class="um">m</span></div><div class="recent"><span>${cabluMed.toFixed(1)} m/electrician-zi</span></div></div>
+    <div class="prod-card" style="border-left-color:#f59e0b"><div class="nume">Zile lucrate</div><div><span class="val-mare">${zile}</span><span class="um">zile</span></div></div>
+    <div class="prod-card" style="border-left-color:#8b5cf6"><div class="nume">Electricieni-zile</div><div><span class="val-mare">${d.totalEl}</span><span class="um">om-zi</span></div><div class="recent"><span>Medie/zi: ${(d.totalEl/zile).toFixed(1)}</span></div></div>
+    <div class="prod-card" style="border-left-color:#06b6d4"><div class="nume">Apartamente atinse</div><div><span class="val-mare">${d.apsAtinse.size}</span><span class="um">ap</span></div><div class="recent"><span>Finalizate: ${d.apsFinalizate.size}</span></div></div>
+    <div class="prod-card" style="border-left-color:#ec4899"><div class="nume">Ore pontaj</div><div><span class="val-mare">${d.orePontaj.toFixed(0)}</span><span class="um">h</span></div><div class="recent"><span>${mPerOra.toFixed(2)} m/oră</span></div></div>
+  `;
+}
+
+function renderAnalizaGrafic(startISO, endISO) {
+  const cont = document.getElementById('analizaGrafic');
+  const d = colectDateAnaliza(startISO, endISO);
+  const zile = Object.keys(d.perZi).sort();
+  if (zile.length === 0) { cont.innerHTML = '<div class="empty">Niciun raport</div>'; return; }
+
+  const tub = zile.map(z => d.perZi[z].tub);
+  const cablu = zile.map(z => d.perZi[z].cablu);
+  const el = zile.map(z => d.perZi[z].electricieni);
+  const maxMat = Math.max(...tub, ...cablu, 1);
+  const maxEl = Math.max(...el, 1);
+
+  const W = Math.max(700, zile.length * 60);
+  const H = 240;
+  const margin = { top: 20, right: 50, bottom: 50, left: 50 };
+  const innerW = W - margin.left - margin.right;
+  const innerH = H - margin.top - margin.bottom;
+
+  function x(i) { return margin.left + (zile.length === 1 ? innerW / 2 : (i / (zile.length - 1)) * innerW); }
+  function yMat(v) { return margin.top + innerH - (v / maxMat) * innerH; }
+  function yEl(v) { return margin.top + innerH - (v / maxEl) * innerH; }
+
+  function path(values, mapY) {
+    return values.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${mapY(v).toFixed(1)}`).join(' ');
+  }
+
+  // Axa Y stânga (material)
+  let yAxis = '';
+  for (let i = 0; i <= 4; i++) {
+    const v = (maxMat * i / 4);
+    const py = yMat(v);
+    yAxis += `<line x1="${margin.left}" y1="${py}" x2="${margin.left + innerW}" y2="${py}" stroke="#f3f4f6" stroke-dasharray="2"/>`;
+    yAxis += `<text x="${margin.left - 5}" y="${py + 3}" font-size="9" fill="#9ca3af" text-anchor="end">${Math.round(v)}</text>`;
+  }
+  // Axa Y dreapta (electricieni)
+  for (let i = 0; i <= 4; i++) {
+    const v = Math.round(maxEl * i / 4);
+    const py = yEl(v);
+    yAxis += `<text x="${margin.left + innerW + 5}" y="${py + 3}" font-size="9" fill="#f59e0b" text-anchor="start">${v}</text>`;
+  }
+  // Axa X (date)
+  let xAxis = '';
+  zile.forEach((z, i) => {
+    if (zile.length <= 14 || i % Math.ceil(zile.length / 10) === 0) {
+      const xx = x(i);
+      const lbl = z.slice(5).replace('-', '/');
+      xAxis += `<text x="${xx}" y="${margin.top + innerH + 14}" font-size="9" fill="#6b7280" text-anchor="middle" transform="rotate(-25 ${xx} ${margin.top + innerH + 14})">${lbl}</text>`;
+      xAxis += `<line x1="${xx}" y1="${margin.top + innerH}" x2="${xx}" y2="${margin.top + innerH + 3}" stroke="#9ca3af"/>`;
+    }
+  });
+
+  // Puncte
+  let dotsTub = zile.map((_, i) => `<circle cx="${x(i)}" cy="${yMat(tub[i])}" r="2.5" fill="#1e40af"/>`).join('');
+  let dotsCablu = zile.map((_, i) => `<circle cx="${x(i)}" cy="${yMat(cablu[i])}" r="2.5" fill="#10b981"/>`).join('');
+  let dotsEl = zile.map((_, i) => `<circle cx="${x(i)}" cy="${yEl(el[i])}" r="2.5" fill="#f59e0b"/>`).join('');
+
+  cont.innerHTML = `
+    <svg width="${W}" height="${H}" style="display:block;min-width:100%">
+      ${yAxis}
+      <path d="${path(tub, yMat)}" stroke="#1e40af" stroke-width="2" fill="none"/>
+      <path d="${path(cablu, yMat)}" stroke="#10b981" stroke-width="2" fill="none"/>
+      <path d="${path(el, yEl)}" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4 2" fill="none"/>
+      ${dotsTub}${dotsCablu}${dotsEl}
+      ${xAxis}
+      <text x="10" y="14" font-size="10" fill="#1e40af" font-weight="600">m (tub/cablu)</text>
+      <text x="${W - 10}" y="14" font-size="10" fill="#f59e0b" font-weight="600" text-anchor="end">electricieni</text>
+    </svg>
+  `;
+}
+
+function renderAnalizaTabelZilnic(startISO, endISO) {
+  const cont = document.getElementById('analizaTabelZilnic');
+  const d = colectDateAnaliza(startISO, endISO);
+  const zile = Object.keys(d.perZi).sort();
+  if (zile.length === 0) { cont.innerHTML = '<div class="empty">Niciun raport</div>'; return; }
+
+  // Eficiența medie
+  const mediiTub = d.totalEl ? d.totalTub / d.totalEl : 0;
+  const mediiCablu = d.totalEl ? d.totalCablu / d.totalEl : 0;
+
+  let html = '<table style="width:100%;border-collapse:collapse"><thead><tr>';
+  html += '<th style="text-align:left;padding:8px;font-size:11px;border-bottom:1px solid #e5e7eb">Data</th>';
+  html += '<th style="text-align:right;padding:8px;font-size:11px;border-bottom:1px solid #e5e7eb">El.</th>';
+  html += '<th style="text-align:right;padding:8px;font-size:11px;border-bottom:1px solid #e5e7eb">Tub (m)</th>';
+  html += '<th style="text-align:right;padding:8px;font-size:11px;border-bottom:1px solid #e5e7eb">Cablu (m)</th>';
+  html += '<th style="text-align:right;padding:8px;font-size:11px;border-bottom:1px solid #e5e7eb">Tub/el</th>';
+  html += '<th style="text-align:right;padding:8px;font-size:11px;border-bottom:1px solid #e5e7eb">Cablu/el</th>';
+  html += '<th style="text-align:center;padding:8px;font-size:11px;border-bottom:1px solid #e5e7eb">Eficiență</th>';
+  html += '</tr></thead><tbody>';
+
+  zile.forEach(z => {
+    const zi = d.perZi[z];
+    const tubEl = zi.electricieni ? zi.tub / zi.electricieni : 0;
+    const cabluEl = zi.electricieni ? zi.cablu / zi.electricieni : 0;
+    const eff = (tubEl + cabluEl) / (mediiTub + mediiCablu || 1);
+    let efIcon = '→', efCol = '#6b7280';
+    if (eff > 1.15) { efIcon = '↑↑'; efCol = '#10b981'; }
+    else if (eff > 1.05) { efIcon = '↑'; efCol = '#10b981'; }
+    else if (eff < 0.85) { efIcon = '↓↓'; efCol = '#dc2626'; }
+    else if (eff < 0.95) { efIcon = '↓'; efCol = '#dc2626'; }
+    html += `<tr>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:12px"><b>${fmtDate(z)}</b></td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-size:12px">${zi.electricieni}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-size:12px">${Math.round(zi.tub)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-size:12px">${Math.round(zi.cablu)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-size:12px">${tubEl.toFixed(1)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-size:12px">${cabluEl.toFixed(1)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:center;font-weight:700;color:${efCol}">${efIcon} ${(eff * 100).toFixed(0)}%</td>
+    </tr>`;
+  });
+  // Totaluri
+  html += `<tr style="background:#f9fafb;font-weight:700">
+    <td style="padding:8px">TOTAL / MEDIA</td>
+    <td style="padding:8px;text-align:right">${d.totalEl}</td>
+    <td style="padding:8px;text-align:right;color:#1e40af">${Math.round(d.totalTub)}</td>
+    <td style="padding:8px;text-align:right;color:#10b981">${Math.round(d.totalCablu)}</td>
+    <td style="padding:8px;text-align:right">${mediiTub.toFixed(1)}</td>
+    <td style="padding:8px;text-align:right">${mediiCablu.toFixed(1)}</td>
+    <td style="padding:8px;text-align:center">—</td>
+  </tr>`;
+  html += '</tbody></table>';
+  cont.innerHTML = html;
+}
+
+function renderAnalizaApartamente(startISO, endISO) {
+  const cont = document.getElementById('analizaApartamente');
+  const d = colectDateAnaliza(startISO, endISO);
+  const coduri = Object.keys(d.perApart).sort();
+  if (coduri.length === 0) { cont.innerHTML = '<div class="empty">Nicio activitate per apartament</div>'; return; }
+
+  let html = '<table style="width:100%;border-collapse:collapse"><thead><tr>';
+  ['Cod', 'Tip', 'mp', 'Stare', 'Zile lucru', 'Tub (m)', 'Cablu (m)', 'Tub/mp', 'Cablu/mp', 'Om-zile'].forEach(h =>
+    html += `<th style="text-align:left;padding:6px 8px;font-size:11px;border-bottom:1px solid #e5e7eb">${h}</th>`);
+  html += '</tr></thead><tbody>';
+
+  coduri.forEach(cod => {
+    const ap = state.apartamente.find(x => x.cod === cod);
+    const tip = ap ? ap.tip : '—';
+    const mp = ap?.mp || null;
+    const a = d.perApart[cod];
+    const stareIcon = a.stareFinala === 'gata' ? '🟢' : (a.stareFinala === 'blocat' ? '🔴' : '🟡');
+    html += `<tr>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:12px;font-weight:600">${stareIcon} ${cod}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280">${tip}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:11px;text-align:right">${mp || '—'}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:11px">${{gata:'Gata',in_lucru:'În lucru',blocat:'Blocat'}[a.stareFinala] || '—'}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:11px;text-align:right">${a.zile.size}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:11px;text-align:right;color:#1e40af">${Math.round(a.tub)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:11px;text-align:right;color:#10b981">${Math.round(a.cablu)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:11px;text-align:right">${mp ? (a.tub / mp).toFixed(2) : '—'}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:11px;text-align:right">${mp ? (a.cablu / mp).toFixed(2) : '—'}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:11px;text-align:right">${a.oameni}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  cont.innerHTML = html;
+}
+
+function renderAnalizaTipuri(startISO, endISO) {
+  const cont = document.getElementById('analizaTipuri');
+  const d = colectDateAnaliza(startISO, endISO);
+
+  const perTip = {};
+  Object.entries(d.perApart).forEach(([cod, a]) => {
+    const ap = state.apartamente.find(x => x.cod === cod);
+    if (!ap) return;
+    if (!perTip[ap.tip]) perTip[ap.tip] = { aps: [], totalMp: 0, totalTub: 0, totalCablu: 0, totalOameni: 0, totalZile: new Set() };
+    perTip[ap.tip].aps.push(cod);
+    if (ap.mp) perTip[ap.tip].totalMp += ap.mp;
+    perTip[ap.tip].totalTub += a.tub;
+    perTip[ap.tip].totalCablu += a.cablu;
+    perTip[ap.tip].totalOameni += a.oameni;
+    a.zile.forEach(z => perTip[ap.tip].totalZile.add(z));
+  });
+
+  if (Object.keys(perTip).length === 0) { cont.innerHTML = '<div class="empty">Nicio activitate</div>'; return; }
+
+  let html = '<table style="width:100%;border-collapse:collapse"><thead><tr>';
+  ['Tip', 'Nr. ap', 'Total mp', 'Tub/ap', 'Cablu/ap', 'Tub/mp', 'Cablu/mp', 'Om-zi/ap'].forEach(h =>
+    html += `<th style="text-align:left;padding:6px 8px;font-size:11px;border-bottom:1px solid #e5e7eb">${h}</th>`);
+  html += '</tr></thead><tbody>';
+
+  TIPURI_AP.forEach(tip => {
+    const t = perTip[tip];
+    if (!t) return;
+    const n = t.aps.length;
+    html += `<tr>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-weight:600;color:#1e40af">${tip}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right">${n}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right">${t.totalMp ? t.totalMp.toFixed(0) : '—'}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;color:#1e40af">${(t.totalTub / n).toFixed(0)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;color:#10b981">${(t.totalCablu / n).toFixed(0)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:600">${t.totalMp ? (t.totalTub / t.totalMp).toFixed(2) : '—'}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;font-weight:600">${t.totalMp ? (t.totalCablu / t.totalMp).toFixed(2) : '—'}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right">${(t.totalOameni / n).toFixed(1)}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  cont.innerHTML = html;
+}
+
+// ============= PDF Analiză =============
+function genereazaAnalizaPDF() {
+  const startISO = analizaPerioada.start || dataStartProiect();
+  const endISO = analizaPerioada.end || dataEndProiect();
+  const d = colectDateAnaliza(startISO, endISO);
+  const zile = Object.keys(d.perZi).sort();
+  if (zile.length === 0) { toast('Niciun raport în perioadă'); return; }
+
+  const tubMed = d.totalEl ? (d.totalTub / d.totalEl) : 0;
+  const cabluMed = d.totalEl ? (d.totalCablu / d.totalEl) : 0;
+  const mPerOra = d.orePontaj ? ((d.totalTub + d.totalCablu) / d.orePontaj) : 0;
+
+  // tabel zilnic
+  let zilnicRows = '';
+  zile.forEach(z => {
+    const zi = d.perZi[z];
+    const tubEl = zi.electricieni ? zi.tub / zi.electricieni : 0;
+    const cabluEl = zi.electricieni ? zi.cablu / zi.electricieni : 0;
+    zilnicRows += `<tr><td>${fmtDate(z)}</td><td style="text-align:right">${zi.electricieni}</td><td style="text-align:right">${Math.round(zi.tub)}</td><td style="text-align:right">${Math.round(zi.cablu)}</td><td style="text-align:right">${tubEl.toFixed(1)}</td><td style="text-align:right">${cabluEl.toFixed(1)}</td></tr>`;
+  });
+  zilnicRows += `<tr style="background:#f3f4f6;font-weight:700"><td>TOTAL</td><td style="text-align:right">${d.totalEl}</td><td style="text-align:right">${Math.round(d.totalTub)}</td><td style="text-align:right">${Math.round(d.totalCablu)}</td><td style="text-align:right">${tubMed.toFixed(1)}</td><td style="text-align:right">${cabluMed.toFixed(1)}</td></tr>`;
+
+  // tabel apartamente
+  let apartRows = '';
+  Object.keys(d.perApart).sort().forEach(cod => {
+    const ap = state.apartamente.find(x => x.cod === cod);
+    const tip = ap ? ap.tip : '—';
+    const mp = ap?.mp || null;
+    const a = d.perApart[cod];
+    apartRows += `<tr><td>${cod}</td><td>${tip}</td><td style="text-align:right">${mp || '—'}</td><td>${{gata:'Gata',in_lucru:'In lucru',blocat:'Blocat'}[a.stareFinala] || '—'}</td><td style="text-align:right">${a.zile.size}</td><td style="text-align:right">${Math.round(a.tub)}</td><td style="text-align:right">${Math.round(a.cablu)}</td><td style="text-align:right">${mp ? (a.tub / mp).toFixed(2) : '—'}</td><td style="text-align:right">${mp ? (a.cablu / mp).toFixed(2) : '—'}</td></tr>`;
+  });
+
+  // tabel medii tip
+  const perTip = {};
+  Object.entries(d.perApart).forEach(([cod, a]) => {
+    const ap = state.apartamente.find(x => x.cod === cod);
+    if (!ap) return;
+    if (!perTip[ap.tip]) perTip[ap.tip] = { aps: [], totalMp: 0, totalTub: 0, totalCablu: 0, totalOameni: 0 };
+    perTip[ap.tip].aps.push(cod);
+    if (ap.mp) perTip[ap.tip].totalMp += ap.mp;
+    perTip[ap.tip].totalTub += a.tub;
+    perTip[ap.tip].totalCablu += a.cablu;
+    perTip[ap.tip].totalOameni += a.oameni;
+  });
+  let tipRows = '';
+  TIPURI_AP.forEach(tip => {
+    const t = perTip[tip]; if (!t) return;
+    const n = t.aps.length;
+    tipRows += `<tr><td><b>${tip}</b></td><td style="text-align:right">${n}</td><td style="text-align:right">${t.totalMp ? t.totalMp.toFixed(0) : '—'}</td><td style="text-align:right">${(t.totalTub / n).toFixed(0)}</td><td style="text-align:right">${(t.totalCablu / n).toFixed(0)}</td><td style="text-align:right">${t.totalMp ? (t.totalTub / t.totalMp).toFixed(2) : '—'}</td><td style="text-align:right">${t.totalMp ? (t.totalCablu / t.totalMp).toFixed(2) : '—'}</td><td style="text-align:right">${(t.totalOameni / n).toFixed(1)}</td></tr>`;
+  });
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="format-detection" content="telephone=no, date=no, address=no, email=no"><title>Analiză ${fmtDate(startISO)} - ${fmtDate(endISO)}</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
+a,a:link{color:inherit !important;text-decoration:none !important}
+.page{background:white;padding:30px;max-width:900px;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1)}
+.header{display:flex;align-items:center;gap:18px;border-bottom:3px solid #1e40af;padding-bottom:12px;margin-bottom:18px}
+.header .logo{width:70px}.header-text .company{font-size:20px;font-weight:700;color:#1e40af}.header-text .sub{font-size:12px;color:#6b7280}
+.intern-badge{background:#dbeafe;color:#1e40af;padding:6px 14px;border-radius:6px;font-weight:600;font-size:12px;text-align:center;margin-bottom:14px;display:inline-block}
+.title{font-size:18px;font-weight:700;text-align:center;margin:8px 0;color:#1e40af}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;background:#f9fafb;padding:12px;border-radius:8px;margin-bottom:14px;font-size:13px}
+h2{font-size:13px;color:#1e40af;margin-top:18px;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:3px}
+table{width:100%;border-collapse:collapse;margin:6px 0 12px}
+th,td{padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:11px}
+th{background:#1e40af;color:white;text-align:left;font-weight:600;font-size:11px}
+.cifre-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+.cifra{background:#f9fafb;padding:10px;border-radius:6px;border-left:3px solid #1e40af}
+.cifra .val{font-size:18px;font-weight:700;color:#1e40af}
+.cifra .lbl{font-size:11px;color:#6b7280}
+.footer{margin-top:20px;padding-top:10px;border-top:1px solid #e5e7eb;font-size:10px;color:#9ca3af;text-align:center}
+.no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;z-index:100}
+@media print{@page{size:A4;margin:10mm}body{background:white}.page{margin:0;box-shadow:none}.no-print{display:none}tr{page-break-inside:avoid}thead{display:table-header-group}}
+</style></head><body>
+<button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
+<div class="page">
+  <div class="intern-badge">📊 RAPORT ANALIZĂ INTERNĂ — arhivă firmă</div>
+  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">${state.firmaNume || 'iFort Systems SRL'}</div><div class="sub">Raport analiză — ${state.santier || 'Corallis'}</div></div></div>
+
+  <div class="title">Analiză perioada ${fmtDate(startISO)} — ${fmtDate(endISO)}</div>
+
+  <h2>1. Cifre cheie</h2>
+  <div class="cifre-grid">
+    <div class="cifra"><div class="val">${Math.round(d.totalTub)} m</div><div class="lbl">Tub total (med ${tubMed.toFixed(1)} m/electrician-zi)</div></div>
+    <div class="cifra"><div class="val">${Math.round(d.totalCablu)} m</div><div class="lbl">Cabluri total (med ${cabluMed.toFixed(1)} m/electrician-zi)</div></div>
+    <div class="cifra"><div class="val">${zile.length} zile</div><div class="lbl">Zile lucrate</div></div>
+    <div class="cifra"><div class="val">${d.totalEl} om-zi</div><div class="lbl">Electricieni-zile (med/zi ${(d.totalEl/zile.length).toFixed(1)})</div></div>
+    <div class="cifra"><div class="val">${d.apsAtinse.size}</div><div class="lbl">Apartamente atinse (finalizate ${d.apsFinalizate.size})</div></div>
+    <div class="cifra"><div class="val">${d.orePontaj.toFixed(0)} h</div><div class="lbl">Ore pontaj (${mPerOra.toFixed(2)} m/oră)</div></div>
+  </div>
+
+  <h2>2. Producție zi cu zi</h2>
+  <table><thead><tr><th>Data</th><th style="text-align:right">El.</th><th style="text-align:right">Tub (m)</th><th style="text-align:right">Cablu (m)</th><th style="text-align:right">Tub/el</th><th style="text-align:right">Cablu/el</th></tr></thead><tbody>${zilnicRows}</tbody></table>
+
+  <h2>3. Performanță apartamente lucrate în perioadă</h2>
+  <table><thead><tr><th>Cod</th><th>Tip</th><th style="text-align:right">mp</th><th>Stare</th><th style="text-align:right">Zile</th><th style="text-align:right">Tub</th><th style="text-align:right">Cablu</th><th style="text-align:right">Tub/mp</th><th style="text-align:right">Cablu/mp</th></tr></thead><tbody>${apartRows}</tbody></table>
+
+  <h2>4. Medii pe tip apartament</h2>
+  <table><thead><tr><th>Tip</th><th style="text-align:right">Nr.</th><th style="text-align:right">Total mp</th><th style="text-align:right">Tub/ap</th><th style="text-align:right">Cablu/ap</th><th style="text-align:right">Tub/mp</th><th style="text-align:right">Cablu/mp</th><th style="text-align:right">Om-zi/ap</th></tr></thead><tbody>${tipRows || '<tr><td colspan="8" style="text-align:center;color:#9ca3af">Niciun apartament cu tip definit</td></tr>'}</tbody></table>
+
+  <div class="footer">Document intern — ${state.firmaNume || 'iFort Systems SRL'} — generat ${fmtDate(todayISO())}</div>
+</div></body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html); w.document.close();
+}
+
+document.getElementById('btnAnalizaPDF').addEventListener('click', genereazaAnalizaPDF);
 
 // ============= KPI NOI v15 =============
 

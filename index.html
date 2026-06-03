@@ -25,7 +25,8 @@
     <button class="tab" data-tab="apartamente">Apart.</button>
     <button class="tab" data-tab="stoc">Stoc</button>
     <button class="tab" data-tab="personal">Personal</button>
-    <button class="tab" data-tab="kpi">KPI</button>
+    <button class="tab" data-tab="analiza">Analiză</button>
+    <button class="tab" data-tab="kpi">KPI+</button>
     <button class="tab" data-tab="situatii">Situații</button>
     <button class="tab" data-tab="setari">Setări</button>
   </nav>
@@ -312,6 +313,62 @@
         </label>
         <div id="sumarPrezenta"></div>
         <button type="button" class="btn-secondary" id="btnExportPrezenta">📅 Export prezență (PDF)</button>
+      </div>
+    </section>
+
+    <!-- TAB: ANALIZA -->
+    <section id="tab-analiza" class="tab-panel">
+      <h2>Analiză</h2>
+
+      <div class="card">
+        <h3>Perioadă</h3>
+        <div class="actions" style="margin-bottom:10px;flex-wrap:wrap">
+          <button type="button" class="btn-secondary" data-perioada="ultima-situatie">📋 Ultima situație</button>
+          <button type="button" class="btn-secondary" data-perioada="tot">🌐 Tot proiectul</button>
+          <button type="button" class="btn-secondary" data-perioada="saptamana">📅 Ultima săpt.</button>
+          <button type="button" class="btn-secondary" data-perioada="luna">🗓️ Ultima lună</button>
+        </div>
+        <div class="row">
+          <label>
+            De la
+            <input type="date" id="analizaStart" />
+          </label>
+          <label>
+            Până la
+            <input type="date" id="analizaEnd" />
+          </label>
+        </div>
+        <p class="small" id="analizaInfoPerioada"></p>
+      </div>
+
+      <div class="card">
+        <h3>🎯 Cifre cheie</h3>
+        <div id="analizaCifre" class="kpi-grid"></div>
+      </div>
+
+      <div class="card">
+        <h3>📈 Trend producție zilnică</h3>
+        <div id="analizaGrafic" style="overflow-x:auto"></div>
+        <p class="small">Albastru = Tub | Verde = Cabluri | Portocaliu = electricieni (axa dreapta)</p>
+      </div>
+
+      <div class="card">
+        <h3>📊 Producție zi cu zi</h3>
+        <div id="analizaTabelZilnic" style="overflow-x:auto"></div>
+      </div>
+
+      <div class="card">
+        <h3>🏠 Performanță apartamente lucrate în perioadă</h3>
+        <div id="analizaApartamente" style="overflow-x:auto"></div>
+      </div>
+
+      <div class="card">
+        <h3>🏗️ Medii pe tip apartament</h3>
+        <div id="analizaTipuri"></div>
+      </div>
+
+      <div class="actions" style="margin-top:10px">
+        <button type="button" class="btn-primary" id="btnAnalizaPDF">📊 Generează raport PDF</button>
       </div>
     </section>
 
