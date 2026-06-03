@@ -2428,6 +2428,50 @@ function genereazaSituatiePDF(s, isPreview = false) {
     `<tr><td style="text-align:center">${i + 1}</td><td>${l.mat.nume}</td><td style="text-align:center">${l.mat.um}</td><td style="text-align:right;font-weight:700">${Math.round(l.val)}</td></tr>`
   ).join('');
 
+  // Detaliu pe zile — sumar compact pentru verificare
+  // Materialele utilizate (cu val > 0) — ordinea din MATERIALE_SITUATIE
+  const matUtilSit = MATERIALE_SITUATIE
+    .map(id => ({ id, mat: state.materiale.find(m => m.id === id) }))
+    .filter(x => x.mat && (s.cantitati[x.id] || 0) > 0);
+
+  // Construiește map zi → { matId: cantitate }
+  const perZi = {};
+  state.rapoarte.forEach(r => {
+    if (r.data < s.dataStart || r.data > s.dataEnd) return;
+    r.alocari.forEach(a => {
+      Object.entries(a.materiale || {}).forEach(([k, v]) => {
+        if (!MATERIALE_SITUATIE.includes(k)) return;
+        if (!perZi[r.data]) perZi[r.data] = {};
+        perZi[r.data][k] = (perZi[r.data][k] || 0) + v;
+      });
+    });
+  });
+  const zileSortate = Object.keys(perZi).sort();
+
+  // Denumiri scurte pentru header (economie de spațiu)
+  function numeScurt(mat) {
+    if (mat.id === 'tub20') return 'Tub';
+    return mat.nume.replace('Cablu CYYF ', '').replace(' mmp', '');
+  }
+  const headerZilnic = `<tr><th style="text-align:left">Data</th>${matUtilSit.map(x => `<th style="text-align:right">${numeScurt(x.mat)}</th>`).join('')}</tr>`;
+  const randuriZilnic = zileSortate.map(d => {
+    const celule = matUtilSit.map(x => {
+      const v = perZi[d][x.id] || 0;
+      return `<td style="text-align:right">${v > 0 ? Math.round(v) : '—'}</td>`;
+    }).join('');
+    return `<tr><td>${fmtDate(d)}</td>${celule}</tr>`;
+  }).join('');
+  const randTotal = `<tr style="background:#f3f4f6;font-weight:700"><td>TOTAL</td>${matUtilSit.map(x => `<td style="text-align:right;color:#1e40af">${Math.round(s.cantitati[x.id] || 0)}</td>`).join('')}</tr>`;
+
+  const tabelZilnic = zileSortate.length > 0 ? `
+  <h3 style="font-size:13px;color:#1e40af;margin-top:14px;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:4px">Detaliu pe zile (verificare)</h3>
+  <table style="font-size:11px">
+    <thead>${headerZilnic}</thead>
+    <tbody>${randuriZilnic}${randTotal}</tbody>
+  </table>
+  <p style="font-size:10px;color:#6b7280;margin-top:2px">Toate cantitățile sunt în <b>m</b>. Suma zilnică = totalul situației.</p>
+  ` : '';
+
   const beneficiar = state.beneficiar || 'Kesz Electric SRL';
   const adresa = state.adresaObiectiv || 'Str. Coralilor, nr 83-87, Sector 1, București';
   const nrSituatie = `${state.prefixSituatie || 'SL-2026-'}${String(s.nr).padStart(3, '0')}`;
@@ -2463,20 +2507,22 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
 .no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;z-index:100}
 @media print{
   @page{size:A4 portrait;margin:10mm}
-  html,body{background:white;width:210mm;height:auto}
+  html,body{background:white}
   body{margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .page{margin:0;padding:0;box-shadow:none;max-width:100%;width:100%;page-break-after:avoid;page-break-inside:avoid}
+  .page{margin:0;padding:0;box-shadow:none;max-width:100%;width:100%}
   .no-print{display:none}
   .header{padding-bottom:6px;margin-bottom:8px}
   .header .logo{width:55px}
   .title{font-size:16px;margin:6px 0 2px}
   .subtitle{font-size:11px;margin-bottom:8px}
   .info-grid{padding:8px 10px;margin-bottom:10px;font-size:11px;gap:4px 14px}
-  table{margin:4px 0 8px}
-  th,td{padding:4px 8px;font-size:11px}
-  h3{font-size:12px;margin-top:8px;margin-bottom:3px}
+  table{margin:4px 0 8px;page-break-inside:auto}
+  thead{display:table-header-group}
+  tr{page-break-inside:avoid}
+  th,td{padding:4px 8px;font-size:10px}
+  h3{font-size:12px;margin-top:8px;margin-bottom:3px;page-break-after:avoid}
   p{font-size:11px;line-height:1.4;margin:3px 0}
-  .semnaturi{margin-top:14px;gap:30px}
+  .semnaturi{margin-top:14px;gap:30px;page-break-inside:avoid}
   .semnaturi .sem-titlu{margin-bottom:30px;font-size:11px}
   .semnaturi .sem-linie{font-size:10px;padding-top:3px}
   .footer{margin-top:10px;padding-top:6px;font-size:9px}
@@ -2504,6 +2550,8 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
     </thead>
     <tbody>${tableRows}</tbody>
   </table>
+
+  ${tabelZilnic}
 
   <h3 style="font-size:14px;color:#1e40af;margin-top:18px;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:4px">Apartamente finalizate (${(s.finalizate || []).length})</h3>
   <p style="font-size:13px;line-height:1.7;margin:6px 0">${(s.finalizate || []).length > 0 ? s.finalizate.join(', ') : '<i style="color:#9ca3af">Niciun apartament finalizat</i>'}</p>
