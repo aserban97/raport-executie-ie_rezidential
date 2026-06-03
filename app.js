@@ -188,7 +188,58 @@ function adaugaAlocare() {
     else { customInput.hidden = true; customInput.value = ''; }
   });
   block.querySelector('.btn-sugestii').addEventListener('click', () => aplicaSugestii(block));
+
+  // Auto-completare aux la blur pe tub
+  const tubInp = block.querySelector('.mat-qty[data-mat="tub20"]');
+  if (tubInp) {
+    tubInp.addEventListener('blur', () => autoCompletareAux(block));
+    tubInp.addEventListener('change', () => autoCompletareAux(block));
+  }
+
   cont.appendChild(block);
+}
+
+// Auto-completează cot/clemă/manșon/dibluri/șuruburi pe baza tubului introdus
+function autoCompletareAux(block) {
+  const tubInp = block.querySelector('.mat-qty[data-mat="tub20"]');
+  const tubVal = parseFloat(tubInp?.value);
+  if (!tubVal || tubVal <= 0) return;
+  const data = rapoarteAuxiliarePerTub();
+  if (!data) return;
+
+  // Materialele auxiliare de auto-completat
+  const AUX_IDS = ['cot20', 'clema20', 'manson20', 'dibluri', 'suruburi'];
+
+  // Calculez raport dibluri+suruburi mediu (egalizat)
+  const rDib = data.ratios['dibluri'] || 0;
+  const rSur = data.ratios['suruburi'] || 0;
+  const rDibSur = (rDib + rSur) > 0 ? (rDib + rSur) / 2 : Math.max(rDib, rSur);
+
+  AUX_IDS.forEach(id => {
+    const inp = block.querySelector(`.mat-qty[data-mat="${id}"]`);
+    if (!inp) return;
+    // Nu suprascrie dacă utilizatorul a pus deja ceva
+    if (inp.value && parseFloat(inp.value) > 0) return;
+
+    let ratio;
+    if (id === 'dibluri' || id === 'suruburi') {
+      ratio = rDibSur;
+    } else {
+      ratio = data.ratios[id] || 0;
+    }
+    if (ratio <= 0) return;
+
+    // Variație random ±2% pentru naturalețe (nu pare robotic)
+    const variatie = 1 + (Math.random() * 0.04 - 0.02); // [0.98 .. 1.02]
+    const sugestie = tubVal * ratio * variatie;
+
+    const m = state.materiale.find(x => x.id === id);
+    if (m && m.um === 'buc') {
+      inp.value = Math.max(1, Math.round(sugestie));
+    } else {
+      inp.value = (Math.round(sugestie * 2) / 2).toFixed(1);
+    }
+  });
 }
 
 // Calculează rapoartele aux/tub din istoric
