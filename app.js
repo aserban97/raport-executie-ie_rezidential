@@ -2464,6 +2464,7 @@ function genereazaSituatiePDF(s, isPreview = false) {
   const randTotal = `<tr style="background:#f3f4f6;font-weight:700"><td>TOTAL</td>${matUtilSit.map(x => `<td style="text-align:right;color:#1e40af">${Math.round(s.cantitati[x.id] || 0)}</td>`).join('')}</tr>`;
 
   const tabelZilnic = zileSortate.length > 0 ? `
+  <div style="page-break-before:always"></div>
   <h3 style="font-size:13px;color:#1e40af;margin-top:14px;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:4px">Detaliu pe zile (verificare)</h3>
   <table style="font-size:11px">
     <thead>${headerZilnic}</thead>
