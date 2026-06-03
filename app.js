@@ -2857,6 +2857,46 @@ document.querySelectorAll('[data-perioada]').forEach(btn => {
 document.getElementById('analizaStart').addEventListener('change', renderAnaliza);
 document.getElementById('analizaEnd').addEventListener('change', renderAnaliza);
 
+// Medii istorice pe TOT proiectul (pentru benchmark scor)
+function calculeazaMediileIstorice() {
+  let totalTub = 0, totalCablu = 0, totalEl = 0, totalZile = 0;
+  let totalMpLucrat = 0, totalMatPeMp = 0, contZileCuMp = 0;
+  const zileLucrate = new Set();
+  let nrFinalizariTotal = 0;
+
+  state.rapoarte.forEach(r => {
+    zileLucrate.add(r.data);
+    totalEl += r.nrElectricieni || 0;
+    let mpZi = 0, matZi = 0;
+    r.alocari.forEach(a => {
+      if (a.stareNoua === 'gata') nrFinalizariTotal++;
+      const ap = state.apartamente.find(x => x.cod === a.ap);
+      const mpAp = ap?.mp || 0;
+      Object.entries(a.materiale || {}).forEach(([k, v]) => {
+        if (k === 'tub20') { totalTub += v; matZi += v; }
+        else if (k.startsWith('cyyf') || k === 'cablu_4x15') { totalCablu += v; matZi += v; }
+      });
+      if (mpAp > 0) mpZi += mpAp;
+    });
+    if (mpZi > 0 && matZi > 0) {
+      totalMpLucrat += mpZi;
+      totalMatPeMp += matZi;
+      contZileCuMp++;
+    }
+  });
+  totalZile = zileLucrate.size;
+
+  return {
+    mPerElectricianZi: totalEl ? (totalTub + totalCablu) / totalEl : 0,
+    tubPerElectricianZi: totalEl ? totalTub / totalEl : 0,
+    cabluPerElectricianZi: totalEl ? totalCablu / totalEl : 0,
+    mPerMp: totalMpLucrat ? totalMatPeMp / totalMpLucrat : 0,
+    zileTotal: totalZile,
+    mediaElPerZi: totalZile ? totalEl / totalZile : 0,
+    nrFinalizariTotal,
+  };
+}
+
 function colectDateAnaliza(startISO, endISO) {
   // Returnează agregare completă pentru perioada dată
   const perZi = {}; // data -> { tub, cablu, electricieni, persoane, sefi, ap: Set }
@@ -2877,7 +2917,6 @@ function colectDateAnaliza(startISO, endISO) {
     r.alocari.forEach(a => {
       apsAtinse.add(a.ap);
       perZi[r.data].ap.add(a.ap);
-      if (a.stareNoua === 'gata') apsFinalizate.add(a.ap);
       if (!perApart[a.ap]) perApart[a.ap] = { tub: 0, cablu: 0, oameni: 0, zile: new Set(), stareFinala: null };
       perApart[a.ap].oameni += a.oameni || 0;
       perApart[a.ap].zile.add(r.data);
@@ -2887,6 +2926,30 @@ function colectDateAnaliza(startISO, endISO) {
         else if (k.startsWith('cyyf') || k === 'cablu_4x15') { perZi[r.data].cablu += v; totalCablu += v; perApart[a.ap].cablu += v; }
       });
     });
+  });
+
+  // Apartamentele "Gata": cele atinse + cu stare 'gata' (fie din alocari oriunde, fie state.apartamente)
+  apsAtinse.forEach(cod => {
+    // Verifică starea curentă a apartamentului din state.apartamente
+    const ap = state.apartamente.find(x => x.cod === cod);
+    if (ap && ap.stare === 'gata') {
+      apsFinalizate.add(cod);
+      if (perApart[cod] && !perApart[cod].stareFinala) perApart[cod].stareFinala = 'gata';
+      return;
+    }
+    // Verifică în toate rapoartele (nu doar cele din perioadă) — ultima stare cronologică
+    let ultimaStare = null;
+    state.rapoarte.slice().sort((a, b) => a.data.localeCompare(b.data)).forEach(r => {
+      r.alocari.forEach(a => {
+        if (a.ap === cod && a.stareNoua) ultimaStare = a.stareNoua;
+      });
+    });
+    if (ultimaStare === 'gata') {
+      apsFinalizate.add(cod);
+      if (perApart[cod]) perApart[cod].stareFinala = 'gata';
+    } else if (perApart[cod] && !perApart[cod].stareFinala) {
+      perApart[cod].stareFinala = ultimaStare;
+    }
   });
 
   // Ore pontaj în perioadă
@@ -3132,12 +3195,58 @@ function genereazaAnalizaPDF() {
 
   // Scor zilnic = m/electrician comparat cu media (nu pe volum!)
   // Asta tine cont ca daca ai 3 oameni vs 10, ce conteaza e cati metri/om
-  function scorZi(zi) {
+  // Medii istorice = benchmark pentru scor (compară cu cum mergi tu, în general)
+  const istoric = calculeazaMediileIstorice();
+
+  // Calculează m/mp lucrat în ZIUA respectivă (suma mp apartamentelor atinse în acea zi)
+  function calcMpZiua(zi, zData) {
+    let mp = 0, finalizari = 0;
+    state.rapoarte.filter(r => r.data === zData).forEach(r => {
+      r.alocari.forEach(a => {
+        const ap = state.apartamente.find(x => x.cod === a.ap);
+        if (ap?.mp) mp += ap.mp;
+        if (a.stareNoua === 'gata') finalizari++;
+      });
+    });
+    return { mp, finalizari };
+  }
+
+  // Scor: combinație productivitate per electrician + eficiență per mp
+  // Comparat cu mediile ISTORICE (tot proiectul), nu doar perioada selectată
+  function scorZi(zi, zData) {
     if (!zi.electricieni) return null;
     const mPerEl = (zi.tub + zi.cablu) / zi.electricieni;
-    if (mPerElMed === 0) return 50;
-    const raport = mPerEl / mPerElMed;
-    return Math.min(100, Math.max(0, Math.round(raport * 50)));
+    const benchmarkMPerEl = istoric.mPerElectricianZi || mPerElMed || 1;
+
+    // Sub-scor 1: productivitate
+    const scorProd = Math.min(100, Math.max(0, (mPerEl / benchmarkMPerEl) * 50));
+
+    // Sub-scor 2: eficiență/mp (doar dacă avem mp)
+    const { mp, finalizari } = calcMpZiua(zi, zData);
+    let scorMp = null;
+    if (mp > 0 && istoric.mPerMp > 0) {
+      const mPerMpZi = (zi.tub + zi.cablu) / mp;
+      scorMp = Math.min(100, Math.max(0, (mPerMpZi / istoric.mPerMp) * 50));
+    }
+
+    // Scor final
+    let scorFinal;
+    if (scorMp !== null) {
+      scorFinal = Math.round((scorProd * 0.5 + scorMp * 0.5));
+    } else {
+      scorFinal = Math.round(scorProd);
+    }
+
+    return {
+      total: scorFinal,
+      scorProd: Math.round(scorProd),
+      scorMp: scorMp !== null ? Math.round(scorMp) : null,
+      mPerEl: mPerEl,
+      mPerMp: mp > 0 ? (zi.tub + zi.cablu) / mp : null,
+      mpLucrati: mp,
+      finalizari,
+      anomalie: (zi.tub + zi.cablu) > benchmarkMPerEl * 3 * (zi.electricieni || 1), // >3× media → suspect
+    };
   }
   function culoareScor(s) {
     if (s === null) return '#9ca3af';
@@ -3153,9 +3262,42 @@ function genereazaAnalizaPDF() {
   }
 
   // Top performeri
-  const zileCuScor = zile.map(z => ({ data: z, ...d.perZi[z], scor: scorZi(d.perZi[z]) })).filter(x => x.scor !== null);
+  const zileCuScor = zile.map(z => {
+    const sObj = scorZi(d.perZi[z], z);
+    return { data: z, ...d.perZi[z], scorObj: sObj, scor: sObj ? sObj.total : null };
+  }).filter(x => x.scor !== null);
   const ceaMaiBuna = zileCuScor.slice().sort((a, b) => b.scor - a.scor)[0];
   const ceaMaiSlaba = zileCuScor.slice().sort((a, b) => a.scor - b.scor)[0];
+
+  // Anomalii (cantități >3× media istorică/electrician)
+  const zileAnomalii = zileCuScor.filter(x => x.scorObj?.anomalie);
+
+  // Predicție ritm pe baza ultimelor 14 zile (sau toată perioada dacă mai puțin)
+  const ultZile14 = zile.slice(-14);
+  let ritmRecent = 0, elZileRecent = 0;
+  ultZile14.forEach(z => {
+    ritmRecent += d.perZi[z].tub + d.perZi[z].cablu;
+    elZileRecent += d.perZi[z].electricieni;
+  });
+  const mPerElZiRecent = elZileRecent ? ritmRecent / elZileRecent : 0;
+  // Apartamente rămase
+  const apsRamase = state.apartamente.filter(ap => ap.stare !== 'gata').length;
+  // Estimare m total rămase: folosim medii istorice m/ap din toate apartamentele cu date
+  let mPerApMediu = 0;
+  if (Object.keys(d.perApart).length > 0) {
+    const sumMatPerApFinalizate = Object.entries(d.perApart)
+      .filter(([cod]) => state.apartamente.find(x => x.cod === cod)?.stare === 'gata')
+      .reduce((s, [, a]) => s + a.tub + a.cablu, 0);
+    const nrFinalizate = Object.entries(d.perApart).filter(([cod]) => state.apartamente.find(x => x.cod === cod)?.stare === 'gata').length;
+    mPerApMediu = nrFinalizate ? sumMatPerApFinalizate / nrFinalizate : 0;
+  }
+  const mRamasiEstimat = apsRamase * mPerApMediu;
+  const ritmMediuZiCalendar = ultZile14.length ? ritmRecent / ultZile14.length : 0;
+  const zileRamaseEstimat = ritmMediuZiCalendar > 0 ? Math.round(mRamasiEstimat / ritmMediuZiCalendar) : null;
+  const saptRamaseEstimat = zileRamaseEstimat ? (zileRamaseEstimat / 5).toFixed(1) : null;
+
+  // Comparație cu media istorică
+  const trendVsIstoric = istoric.mPerElectricianZi ? ((mPerElZiRecent - istoric.mPerElectricianZi) / istoric.mPerElectricianZi * 100) : 0;
 
   // Concluzii apartamente
   const apsArr = Object.entries(d.perApart).map(([cod, a]) => {
@@ -3188,8 +3330,9 @@ function genereazaAnalizaPDF() {
   let bareScor = '';
   zile.forEach((z, i) => {
     const zi = d.perZi[z];
-    const s = scorZi(zi);
-    if (s === null) return;
+    const sObj = scorZi(zi, z);
+    if (sObj === null) return;
+    const s = sObj.total;
     const h = (s / 100) * Gih;
     const py = Gmar.top + Gih - h;
     const col = culoareScor(s);
@@ -3262,11 +3405,16 @@ function genereazaAnalizaPDF() {
     const zi = d.perZi[z];
     const tubEl = zi.electricieni ? zi.tub / zi.electricieni : 0;
     const cabluEl = zi.electricieni ? zi.cablu / zi.electricieni : 0;
-    const s = scorZi(zi);
+    const sObj = scorZi(zi, z);
+    const s = sObj ? sObj.total : null;
     const colS = culoareScor(s);
-    zilnicRows += `<tr><td>${bulinaScor(s)} <b>${fmtDate(z)}</b></td><td style="text-align:right">${zi.electricieni}</td><td style="text-align:right">${Math.round(zi.tub)}</td><td style="text-align:right">${Math.round(zi.cablu)}</td><td style="text-align:right;font-weight:700">${tubEl.toFixed(1)}</td><td style="text-align:right;font-weight:700">${cabluEl.toFixed(1)}</td><td style="text-align:center;font-weight:700;color:${colS}">${s !== null ? s : '—'}</td></tr>`;
+    const detaliuScor = sObj ?
+      (sObj.scorMp !== null ? `${sObj.scorProd}/${sObj.scorMp}` : `${sObj.scorProd}`) :
+      '—';
+    const anomFlag = sObj?.anomalie ? ' ⚠️' : '';
+    zilnicRows += `<tr><td>${bulinaScor(s)} <b>${fmtDate(z)}</b>${anomFlag}</td><td style="text-align:right">${zi.electricieni}</td><td style="text-align:right">${Math.round(zi.tub)}</td><td style="text-align:right">${Math.round(zi.cablu)}</td><td style="text-align:right;font-weight:700">${tubEl.toFixed(1)}</td><td style="text-align:right;font-weight:700">${cabluEl.toFixed(1)}</td><td style="text-align:center;font-weight:700;color:${colS}">${s !== null ? s : '—'}</td><td style="text-align:center;font-size:9px;color:#6b7280">${detaliuScor}</td></tr>`;
   });
-  zilnicRows += `<tr style="background:#f3f4f6;font-weight:700"><td>MEDIA</td><td style="text-align:right">${d.totalEl}</td><td style="text-align:right">${Math.round(d.totalTub)}</td><td style="text-align:right">${Math.round(d.totalCablu)}</td><td style="text-align:right">${tubMed.toFixed(1)}</td><td style="text-align:right">${cabluMed.toFixed(1)}</td><td style="text-align:center">—</td></tr>`;
+  zilnicRows += `<tr style="background:#f3f4f6;font-weight:700"><td>MEDIA</td><td style="text-align:right">${d.totalEl}</td><td style="text-align:right">${Math.round(d.totalTub)}</td><td style="text-align:right">${Math.round(d.totalCablu)}</td><td style="text-align:right">${tubMed.toFixed(1)}</td><td style="text-align:right">${cabluMed.toFixed(1)}</td><td style="text-align:center">—</td><td></td></tr>`;
 
   // === TABEL APARTAMENTE (sortat după total) ===
   const apartSortate = apsArr.slice().sort((a, b) => b.total - a.total);
@@ -3307,7 +3455,23 @@ function genereazaAnalizaPDF() {
   if (apEficient && apIneficient && apEficient.cod !== apIneficient.cod) {
     const effE = (apEficient.tub + apEficient.cablu) / apEficient.mp;
     const effI = (apIneficient.tub + apIneficient.cablu) / apIneficient.mp;
-    concluzii += `<div style="background:#f9fafb;padding:10px;border-left:4px solid #6b7280;border-radius:4px"><b>📐 Consum/mp:</b> <span style="color:#10b981">cel mai eficient ${apEficient.cod} (${effE.toFixed(2)} m/mp)</span> vs <span style="color:#dc2626">cel mai consumator ${apIneficient.cod} (${effI.toFixed(2)} m/mp)</span></div>`;
+    concluzii += `<div style="background:#f9fafb;padding:10px;border-left:4px solid #6b7280;border-radius:4px;margin-bottom:6px"><b>📐 Consum/mp:</b> <span style="color:#10b981">cel mai eficient ${apEficient.cod} (${effE.toFixed(2)} m/mp)</span> vs <span style="color:#dc2626">cel mai consumator ${apIneficient.cod} (${effI.toFixed(2)} m/mp)</span></div>`;
+  }
+  // Trend vs istoric
+  if (istoric.zileTotal > 0 && mPerElZiRecent > 0) {
+    const trendIcon = trendVsIstoric > 5 ? '↑' : trendVsIstoric < -5 ? '↓' : '→';
+    const trendCol = trendVsIstoric > 5 ? '#10b981' : trendVsIstoric < -5 ? '#dc2626' : '#6b7280';
+    const sign = trendVsIstoric > 0 ? '+' : '';
+    concluzii += `<div style="background:#eff6ff;padding:10px;border-left:4px solid #1e40af;border-radius:4px;margin-bottom:6px"><b>📊 Ritm recent vs istoric proiect:</b> ${mPerElZiRecent.toFixed(1)} m/electrician-zi (ultimele ${ultZile14.length} zile) vs medie istorică ${istoric.mPerElectricianZi.toFixed(1)} m/electrician-zi → <span style="color:${trendCol};font-weight:700">${trendIcon} ${sign}${trendVsIstoric.toFixed(0)}%</span></div>`;
+  }
+  // Predicție
+  if (zileRamaseEstimat && apsRamase > 0) {
+    concluzii += `<div style="background:#fef3c7;padding:10px;border-left:4px solid #f59e0b;border-radius:4px;margin-bottom:6px"><b>📅 Predicție rămas proiect:</b> ${apsRamase} apartamente neterminate × ${Math.round(mPerApMediu)}m mediu = aprox <b>${Math.round(mRamasiEstimat)}m</b> de instalat. La ritmul actual (${ritmMediuZiCalendar.toFixed(0)} m/zi), termini în ~<b>${zileRamaseEstimat} zile lucrătoare</b> (≈${saptRamaseEstimat} săpt.)</div>`;
+  }
+  // Anomalii
+  if (zileAnomalii.length > 0) {
+    const liste = zileAnomalii.slice(0, 3).map(x => `${fmtDate(x.data)} (${Math.round(x.tub + x.cablu)}m)`).join(', ');
+    concluzii += `<div style="background:#fee2e2;padding:10px;border-left:4px solid #dc2626;border-radius:4px"><b>⚠️ Cantități suspect mari</b> (>3× media pentru nr electricieni): ${liste}${zileAnomalii.length > 3 ? ` + alte ${zileAnomalii.length - 3}` : ''}. Verifică să nu fie typing greșit la zecimale.</div>`;
   }
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="format-detection" content="telephone=no, date=no, address=no, email=no"><title>Analiză ${fmtDate(startISO)} - ${fmtDate(endISO)}</title>
@@ -3385,10 +3549,10 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600;font-size:10px
 
   <h2>📋 Detaliu zi cu zi</h2>
   <table>
-    <thead><tr><th>Data</th><th style="text-align:right">El.</th><th style="text-align:right">Tub</th><th style="text-align:right">Cablu</th><th style="text-align:right">Tub/el</th><th style="text-align:right">Cablu/el</th><th style="text-align:center">Scor</th></tr></thead>
+    <thead><tr><th>Data</th><th style="text-align:right">El.</th><th style="text-align:right">Tub</th><th style="text-align:right">Cablu</th><th style="text-align:right">Tub/el</th><th style="text-align:right">Cablu/el</th><th style="text-align:center">Scor</th><th style="text-align:center" title="Sub-scoruri: productivitate / eficiență per mp">P/MP</th></tr></thead>
     <tbody>${zilnicRows}</tbody>
   </table>
-  <p style="font-size:10px;color:#6b7280">🟢 ≥65 zi bună • 🟡 40-64 zi medie • 🔴 &lt;40 zi slabă</p>
+  <p style="font-size:10px;color:#6b7280">🟢 ≥65 zi bună • 🟡 40-64 zi medie • 🔴 &lt;40 zi slabă • ⚠️ cantitate suspect mare (verifică) • P/MP = sub-scor productivitate / sub-scor eficiență per mp</p>
 </div>
 
 <!-- PAGINA 3: APARTAMENTE -->
