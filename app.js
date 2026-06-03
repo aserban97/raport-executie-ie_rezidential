@@ -2928,18 +2928,19 @@ function colectDateAnaliza(startISO, endISO) {
     });
   });
 
-  // Apartamentele "Gata": cele atinse + cu stare 'gata' (fie din alocari oriunde, fie state.apartamente)
+  // Apartamentele "Gata": determinăm starea REALĂ din state.apartamente + toate rapoartele
+  // (nu doar din alocările perioadei selectate)
   apsAtinse.forEach(cod => {
-    // Verifică starea curentă a apartamentului din state.apartamente
     const ap = state.apartamente.find(x => x.cod === cod);
+    // Prioritate 1: state.apartamente[].stare (sursa adevărului — setat la salvare/edit raport/manual)
     if (ap && ap.stare === 'gata') {
       apsFinalizate.add(cod);
-      if (perApart[cod] && !perApart[cod].stareFinala) perApart[cod].stareFinala = 'gata';
+      if (perApart[cod]) perApart[cod].stareFinala = 'gata';
       return;
     }
-    // Verifică în toate rapoartele (nu doar cele din perioadă) — ultima stare cronologică
+    // Prioritate 2: ultima stareNoua din TOATE rapoartele (sortate cronologic)
     let ultimaStare = null;
-    state.rapoarte.slice().sort((a, b) => a.data.localeCompare(b.data)).forEach(r => {
+    state.rapoarte.slice().sort((a, b) => a.data.localeCompare(b.data) || (a.createdAt || '').localeCompare(b.createdAt || '')).forEach(r => {
       r.alocari.forEach(a => {
         if (a.ap === cod && a.stareNoua) ultimaStare = a.stareNoua;
       });
@@ -2947,8 +2948,9 @@ function colectDateAnaliza(startISO, endISO) {
     if (ultimaStare === 'gata') {
       apsFinalizate.add(cod);
       if (perApart[cod]) perApart[cod].stareFinala = 'gata';
-    } else if (perApart[cod] && !perApart[cod].stareFinala) {
-      perApart[cod].stareFinala = ultimaStare;
+    } else if (perApart[cod]) {
+      // Suprascrie stareFinala din perioada selectata cu cea cronologic ultima
+      perApart[cod].stareFinala = ultimaStare || (ap?.stare) || perApart[cod].stareFinala;
     }
   });
 
