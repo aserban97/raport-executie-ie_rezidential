@@ -2977,8 +2977,7 @@ function renderAnalizaCifre(startISO, endISO) {
     <div class="prod-card" style="border-left-color:#10b981"><div class="nume">Cabluri total</div><div><span class="val-mare">${Math.round(d.totalCablu)}</span><span class="um">m</span></div><div class="recent"><span>${cabluMed.toFixed(1)} m/electrician-zi</span></div></div>
     <div class="prod-card" style="border-left-color:#f59e0b"><div class="nume">Zile lucrate</div><div><span class="val-mare">${zile}</span><span class="um">zile</span></div></div>
     <div class="prod-card" style="border-left-color:#8b5cf6"><div class="nume">Electricieni-zile</div><div><span class="val-mare">${d.totalEl}</span><span class="um">om-zi</span></div><div class="recent"><span>Medie/zi: ${(d.totalEl/zile).toFixed(1)}</span></div></div>
-    <div class="prod-card" style="border-left-color:#06b6d4"><div class="nume">Apartamente atinse</div><div><span class="val-mare">${d.apsAtinse.size}</span><span class="um">ap</span></div><div class="recent"><span>Finalizate: ${d.apsFinalizate.size}</span></div></div>
-    <div class="prod-card" style="border-left-color:#ec4899"><div class="nume">Ore pontaj</div><div><span class="val-mare">${d.orePontaj.toFixed(0)}</span><span class="um">h</span></div><div class="recent"><span>${mPerOra.toFixed(2)} m/oră</span></div></div>
+    <div class="prod-card" style="border-left-color:#06b6d4"><div class="nume">Apartamente</div><div><span class="val-mare">${d.apsFinalizate.size}/${state.apartamente.length}</span><span class="um">finalizate</span></div><div class="recent"><span>Atinse în perioadă: ${d.apsAtinse.size}</span></div></div>
   `;
 }
 
@@ -3311,7 +3310,8 @@ function genereazaAnalizaPDF() {
   const apIneficient = apsArr.filter(a => a.mp).slice().sort((a, b) => (b.tub + b.cablu) / b.mp - (a.tub + a.cablu) / a.mp)[0];
 
   // === GRAFIC SVG: bare scor zile ===
-  const Gw = Math.max(600, zile.length * 35);
+  // Width fix 780 (încape pe pagina A4 cu margine 10mm)
+  const Gw = 780;
   const Gh = 200;
   const Gmar = { top: 20, right: 20, bottom: 40, left: 40 };
   const Giw = Gw - Gmar.left - Gmar.right;
@@ -3347,7 +3347,7 @@ function genereazaAnalizaPDF() {
     }
   });
 
-  const graficSVG = `<svg width="${Gw}" height="${Gh}" style="display:block">
+  const graficSVG = `<svg viewBox="0 0 ${Gw} ${Gh}" width="100%" height="${Gh}" preserveAspectRatio="xMidYMid meet" style="display:block;max-width:100%">
     ${grilaScor}
     <line x1="${Gmar.left}" y1="${yMed}" x2="${Gmar.left + Giw}" y2="${yMed}" stroke="#10b981" stroke-width="0.5" stroke-dasharray="3 3"/>
     <text x="${Gmar.left + Giw - 5}" y="${yMed - 3}" font-size="8" fill="#10b981" text-anchor="end">prag bun (65)</text>
@@ -3360,7 +3360,7 @@ function genereazaAnalizaPDF() {
   const tubPerEl = zile.map(z => d.perZi[z].electricieni ? d.perZi[z].tub / d.perZi[z].electricieni : 0);
   const cabluPerEl = zile.map(z => d.perZi[z].electricieni ? d.perZi[z].cablu / d.perZi[z].electricieni : 0);
   const maxLine = Math.max(...tubPerEl, ...cabluPerEl, 1);
-  const Lw = Math.max(600, zile.length * 40);
+  const Lw = 780;
   const Lh = 180;
   const Lmar = { top: 20, right: 20, bottom: 40, left: 40 };
   const Liw = Lw - Lmar.left - Lmar.right;
@@ -3389,7 +3389,7 @@ function genereazaAnalizaPDF() {
     }
   });
 
-  const graficLinieSVG = `<svg width="${Lw}" height="${Lh}" style="display:block">
+  const graficLinieSVG = `<svg viewBox="0 0 ${Lw} ${Lh}" width="100%" height="${Lh}" preserveAspectRatio="xMidYMid meet" style="display:block;max-width:100%">
     ${grilaLin}
     <line x1="${Lmar.left}" y1="${yMedTub}" x2="${Lmar.left + Liw}" y2="${yMedTub}" stroke="#1e40af" stroke-width="0.5" stroke-dasharray="3 3" opacity="0.5"/>
     <text x="${Lmar.left + Liw - 5}" y="${yMedTub - 3}" font-size="8" fill="#1e40af" text-anchor="end">med tub: ${tubMed.toFixed(1)}</text>
@@ -3498,7 +3498,7 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600;font-size:10px
 .legend{font-size:10px;color:#6b7280;display:flex;gap:14px;justify-content:center;margin-bottom:6px}
 .legend-item{display:flex;align-items:center;gap:4px}
 .legend-color{width:12px;height:8px;border-radius:2px}
-.grafic-box{border:1px solid #e5e7eb;border-radius:6px;padding:8px;margin-bottom:8px;background:#fafbfc;overflow-x:auto}
+.grafic-box{border:1px solid #e5e7eb;border-radius:6px;padding:8px;margin-bottom:8px;background:#fafbfc;overflow:hidden}
 .footer{margin-top:18px;padding-top:8px;border-top:1px solid #e5e7eb;font-size:9px;color:#9ca3af;text-align:center}
 .no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;z-index:100}
 .page-break{display:block;page-break-before:always;break-before:page;height:0}
@@ -3513,17 +3513,15 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600;font-size:10px
   <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">${state.firmaNume || 'iFort Systems SRL'}</div><div class="sub">Raport analiză — ${state.santier || 'Corallis'}</div></div></div>
 
   <div class="title">Analiză perioada ${fmtDate(startISO)} — ${fmtDate(endISO)}</div>
-  <div class="subtitle">${zile.length} zile lucrate • ${d.apsAtinse.size} apartamente atinse • ${d.totalEl} electricieni-zile</div>
+  <div class="subtitle">${zile.length} zile lucrate • ${state.apartamente.length} apartamente în proiect (${d.apsAtinse.size} atinse în perioadă) • ${d.totalEl} electricieni-zile</div>
 
   <div class="cifre-grid">
     <div class="cifra"><div class="val">${Math.round(d.totalTub)}</div><div class="lbl">m tub TOTAL</div></div>
     <div class="cifra" style="border-left-color:#10b981"><div class="val" style="color:#10b981">${Math.round(d.totalCablu)}</div><div class="lbl">m cabluri TOTAL</div></div>
     <div class="cifra" style="border-left-color:#f59e0b"><div class="val" style="color:#f59e0b">${tubMed.toFixed(1)}</div><div class="lbl">m tub / electrician-zi</div></div>
     <div class="cifra" style="border-left-color:#8b5cf6"><div class="val" style="color:#8b5cf6">${cabluMed.toFixed(1)}</div><div class="lbl">m cablu / electrician-zi</div></div>
-    <div class="cifra"><div class="val">${d.apsFinalizate.size}/${d.apsAtinse.size}</div><div class="lbl">apartamente finalizate</div></div>
-    <div class="cifra" style="border-left-color:#10b981"><div class="val" style="color:#10b981">${d.orePontaj.toFixed(0)}h</div><div class="lbl">ore pontaj</div></div>
+    <div class="cifra"><div class="val">${d.apsFinalizate.size}/${state.apartamente.length}</div><div class="lbl">apartamente finalizate</div></div>
     <div class="cifra" style="border-left-color:#06b6d4"><div class="val" style="color:#06b6d4">${(d.totalEl/zile.length).toFixed(1)}</div><div class="lbl">electricieni medie/zi</div></div>
-    <div class="cifra" style="border-left-color:#ec4899"><div class="val" style="color:#ec4899">${d.orePontaj ? ((d.totalTub+d.totalCablu)/d.orePontaj).toFixed(2) : '—'}</div><div class="lbl">m / oră pontaj</div></div>
   </div>
 
   <h2>📌 Concluzii cheie</h2>
