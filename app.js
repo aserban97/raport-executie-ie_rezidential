@@ -2464,13 +2464,15 @@ function genereazaSituatiePDF(s, isPreview = false) {
   const randTotal = `<tr style="background:#f3f4f6;font-weight:700"><td>TOTAL</td>${matUtilSit.map(x => `<td style="text-align:right;color:#1e40af">${Math.round(s.cantitati[x.id] || 0)}</td>`).join('')}</tr>`;
 
   const tabelZilnic = zileSortate.length > 0 ? `
-  <div style="page-break-before:always"></div>
-  <h3 style="font-size:13px;color:#1e40af;margin-top:14px;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:4px">Detaliu pe zile (verificare)</h3>
-  <table style="font-size:11px">
-    <thead>${headerZilnic}</thead>
-    <tbody>${randuriZilnic}${randTotal}</tbody>
-  </table>
-  <p style="font-size:10px;color:#6b7280;margin-top:2px">Toate cantitățile sunt în <b>m</b>. Suma zilnică = totalul situației.</p>
+  <div class="page-break"></div>
+  <div class="zilnic-wrap">
+    <h3 style="font-size:13px;color:#1e40af;margin-top:0;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:4px">Detaliu pe zile (verificare)</h3>
+    <table style="font-size:11px">
+      <thead>${headerZilnic}</thead>
+      <tbody>${randuriZilnic}${randTotal}</tbody>
+    </table>
+    <p style="font-size:10px;color:#6b7280;margin-top:2px">Toate cantitățile sunt în <b>m</b>. Suma zilnică = totalul situației.</p>
+  </div>
   ` : '';
 
   const beneficiar = state.beneficiar || 'Kesz Electric SRL';
@@ -2506,6 +2508,9 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
 .semnaturi .sem-linie{border-top:1px solid #6b7280;padding-top:6px;font-size:12px;color:#6b7280}
 .footer{margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center}
 .no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;z-index:100}
+.page-break{display:block;page-break-before:always;break-before:page;height:0;overflow:hidden}
+.zilnic-wrap{page-break-before:always;break-before:page}
+@media screen{.page-break{display:none}.zilnic-wrap{page-break-before:auto;break-before:auto;margin-top:14px}}
 @media print{
   @page{size:A4 portrait;margin:10mm}
   html,body{background:white}
