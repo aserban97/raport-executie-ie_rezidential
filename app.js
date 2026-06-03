@@ -200,38 +200,29 @@ function adaugaAlocare() {
 }
 
 // Auto-completează cot/clemă/manșon/dibluri/șuruburi pe baza tubului introdus
+// Coeficienți ficși per metru tub (cu variație ±2% pentru naturalețe)
+const COEF_AUX = {
+  cot20: 0.3,
+  clema20: 2.0,
+  manson20: 0.1,
+  dibluri: 2.0,
+  suruburi: 2.0,
+};
+
 function autoCompletareAux(block) {
   const tubInp = block.querySelector('.mat-qty[data-mat="tub20"]');
   const tubVal = parseFloat(tubInp?.value);
   if (!tubVal || tubVal <= 0) return;
-  const data = rapoarteAuxiliarePerTub();
-  if (!data) return;
 
-  // Materialele auxiliare de auto-completat
-  const AUX_IDS = ['cot20', 'clema20', 'manson20', 'dibluri', 'suruburi'];
-
-  // Calculez raport dibluri+suruburi mediu (egalizat)
-  const rDib = data.ratios['dibluri'] || 0;
-  const rSur = data.ratios['suruburi'] || 0;
-  const rDibSur = (rDib + rSur) > 0 ? (rDib + rSur) / 2 : Math.max(rDib, rSur);
-
-  AUX_IDS.forEach(id => {
+  Object.entries(COEF_AUX).forEach(([id, coef]) => {
     const inp = block.querySelector(`.mat-qty[data-mat="${id}"]`);
     if (!inp) return;
     // Nu suprascrie dacă utilizatorul a pus deja ceva
     if (inp.value && parseFloat(inp.value) > 0) return;
 
-    let ratio;
-    if (id === 'dibluri' || id === 'suruburi') {
-      ratio = rDibSur;
-    } else {
-      ratio = data.ratios[id] || 0;
-    }
-    if (ratio <= 0) return;
-
     // Variație random ±2% pentru naturalețe (nu pare robotic)
     const variatie = 1 + (Math.random() * 0.04 - 0.02); // [0.98 .. 1.02]
-    const sugestie = tubVal * ratio * variatie;
+    const sugestie = tubVal * coef * variatie;
 
     const m = state.materiale.find(x => x.id === id);
     if (m && m.um === 'buc') {
