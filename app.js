@@ -137,7 +137,7 @@ document.querySelectorAll('.tab').forEach(btn => {
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'apartamente') { renderApartamente(); renderNorme(); }
     if (btn.dataset.tab === 'calendar') renderCalendar();
-    if (btn.dataset.tab === 'stoc') renderStoc();
+    if (btn.dataset.tab === 'stoc') { renderStoc(); renderNecesarPreview(); }
     if (btn.dataset.tab === 'personal') renderPersonal();
     if (btn.dataset.tab === 'situatii') renderSituatii();
     if (btn.dataset.tab === 'analiza') renderAnaliza();
@@ -1131,6 +1131,185 @@ function renderNorme() {
 }
 
 // ============= STOC =============
+// ===== NECESAR MATERIALE (estimare comandă furnizor) =====
+function calculeazaNecesar(zileIstoric, zileProiect, marjaPct) {
+  // Iau ultimele N zile cu activitate (cu rapoarte și cu cantități > 0)
+  const zileCuConsum = state.rapoarte
+    .filter(r => {
+      // are cel puțin un material consumat
+      return Object.values(r.materiale || {}).some(v => v > 0);
+    })
+    .map(r => ({ data: r.data, materiale: r.materiale || {} }))
+    .sort((a, b) => b.data.localeCompare(a.data))
+    .slice(0, zileIstoric);
+
+  if (zileCuConsum.length === 0) return null;
+
+  // Sumă per material
+  const sume = {};
+  zileCuConsum.forEach(z => {
+    Object.entries(z.materiale).forEach(([k, v]) => {
+      sume[k] = (sume[k] || 0) + v;
+    });
+  });
+
+  // Medie zilnică × zile proiect × (1 + marjă)
+  const marjaFactor = 1 + (marjaPct / 100);
+  const necesar = {};
+  Object.entries(sume).forEach(([k, total]) => {
+    const medieZi = total / zileCuConsum.length;
+    necesar[k] = medieZi * zileProiect * marjaFactor;
+  });
+
+  return {
+    necesar,
+    zileBaza: zileCuConsum.length,
+    intervalBaza: zileCuConsum.length > 0 ? `${fmtDate(zileCuConsum[zileCuConsum.length - 1].data)} → ${fmtDate(zileCuConsum[0].data)}` : '—',
+    sumeBruta: sume,
+  };
+}
+
+function renderNecesarPreview() {
+  const cont = document.getElementById('necesarPreview');
+  if (!cont) return;
+  const zi = parseInt(document.getElementById('necesarZileIstoric').value, 10) || 5;
+  const zp = parseInt(document.getElementById('necesarZileProiect').value, 10) || 5;
+  const m = parseFloat(document.getElementById('necesarMarja').value) || 0;
+
+  const rez = calculeazaNecesar(zi, zp, m);
+  if (!rez) { cont.innerHTML = '<div class="empty">Niciun consum istoric — introdu rapoarte cu materiale</div>'; return; }
+
+  // Ordonare materiale: mai întâi cele cu cantitate mai mare
+  const sortate = Object.entries(rez.necesar)
+    .map(([k, v]) => ({ id: k, val: v, mat: state.materiale.find(x => x.id === k) }))
+    .filter(x => x.mat && x.val > 0)
+    .sort((a, b) => b.val - a.val);
+
+  if (sortate.length === 0) { cont.innerHTML = '<div class="empty">Nimic de comandat</div>'; return; }
+
+  let html = `<p class="small" style="margin-bottom:6px"><b>Bază calcul:</b> ${rez.zileBaza} zile cu consum (${rez.intervalBaza})</p>`;
+  html += '<table style="width:100%;border-collapse:collapse;margin-top:4px"><thead><tr>';
+  html += '<th style="text-align:left;padding:6px 8px;font-size:11px;border-bottom:1px solid #e5e7eb">Material</th>';
+  html += '<th style="text-align:center;padding:6px 8px;font-size:11px;border-bottom:1px solid #e5e7eb">UM</th>';
+  html += '<th style="text-align:right;padding:6px 8px;font-size:11px;border-bottom:1px solid #e5e7eb">Cantitate necesară</th>';
+  html += '<th style="text-align:right;padding:6px 8px;font-size:11px;border-bottom:1px solid #e5e7eb">Medie/zi</th>';
+  html += '</tr></thead><tbody>';
+  sortate.forEach(x => {
+    const medZi = x.val / zp / (1 + m / 100);
+    const cant = x.mat.um === 'buc' ? Math.ceil(x.val) : Math.ceil(x.val / 5) * 5; // rotunjește la 5m pt cabluri/tub
+    html += `<tr><td style="padding:6px 8px;font-size:13px">${x.mat.nume}</td><td style="text-align:center;padding:6px 8px;font-size:12px">${x.mat.um}</td><td style="text-align:right;padding:6px 8px;font-size:14px;font-weight:700;color:#1e40af">${cant}</td><td style="text-align:right;padding:6px 8px;font-size:11px;color:#6b7280">${medZi.toFixed(1)} ${x.mat.um}/zi</td></tr>`;
+  });
+  html += '</tbody></table>';
+  cont.innerHTML = html;
+}
+
+// Wire UI
+document.addEventListener('DOMContentLoaded', () => {
+  const btnR = document.getElementById('btnNecesarRefresh');
+  const btnPDF = document.getElementById('btnNecesarPDF');
+  const inputs = ['necesarZileIstoric', 'necesarZileProiect', 'necesarMarja'].map(id => document.getElementById(id));
+  if (btnR) btnR.addEventListener('click', renderNecesarPreview);
+  inputs.forEach(inp => { if (inp) inp.addEventListener('change', renderNecesarPreview); });
+  if (btnPDF) btnPDF.addEventListener('click', genereazaNecesarPDF);
+});
+
+function genereazaNecesarPDF() {
+  const zi = parseInt(document.getElementById('necesarZileIstoric').value, 10) || 5;
+  const zp = parseInt(document.getElementById('necesarZileProiect').value, 10) || 5;
+  const m = parseFloat(document.getElementById('necesarMarja').value) || 0;
+  const rez = calculeazaNecesar(zi, zp, m);
+  if (!rez) { toast('Niciun istoric disponibil'); return; }
+
+  const sortate = Object.entries(rez.necesar)
+    .map(([k, v]) => ({ id: k, val: v, mat: state.materiale.find(x => x.id === k) }))
+    .filter(x => x.mat && x.val > 0)
+    .sort((a, b) => b.val - a.val);
+
+  if (sortate.length === 0) { toast('Nimic de comandat'); return; }
+
+  const tableRows = sortate.map((x, i) => {
+    const cant = x.mat.um === 'buc' ? Math.ceil(x.val) : Math.ceil(x.val / 5) * 5;
+    const medZi = x.val / zp / (1 + m / 100);
+    return `<tr><td style="text-align:center">${i + 1}</td><td>${x.mat.nume}</td><td style="text-align:center">${x.mat.um}</td><td style="text-align:right;font-weight:700">${cant}</td><td style="text-align:right;color:#6b7280;font-size:11px">${medZi.toFixed(1)} ${x.mat.um}/zi</td></tr>`;
+  }).join('');
+
+  const antetFirma = `
+    <div style="font-size:11px;line-height:1.5;color:#374151;margin-bottom:10px">
+      <div style="font-weight:700;font-size:13px;color:#1e40af">${state.firmaNume || 'iFort Systems SRL'}</div>
+      <div>${state.firmaAdresa || ''}</div>
+      <div><b>CUI:</b> ${state.firmaCUI || ''} &nbsp; <b>ONRC:</b> ${state.firmaONRC || ''}</div>
+      <div><b>IBAN:</b> <span style="color:#374151">${state.firmaIBAN || ''}</span></div>
+    </div>`;
+
+  const beneficiar = state.beneficiar || 'Kesz Electric SRL';
+  const adresa = state.adresaObiectiv || 'Str. Coralilor, nr 83-87, Sector 1, București';
+  const dataGenerare = todayISO();
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="format-detection" content="telephone=no, date=no, address=no, email=no"><title>Necesar materiale ${fmtDate(dataGenerare)}</title>
+<style>
+*{box-sizing:border-box}
+a,a:link,a:visited{color:inherit !important;text-decoration:none !important;cursor:default}
+body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
+.page{background:white;padding:35px;max-width:780px;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1)}
+.header{display:flex;align-items:flex-start;gap:18px;border-bottom:3px solid #f59e0b;padding-bottom:12px;margin-bottom:18px}
+.header .logo{width:80px;height:auto;object-fit:contain}
+.title{font-size:20px;font-weight:700;text-align:center;margin:18px 0 6px;color:#f59e0b}
+.subtitle{font-size:13px;color:#6b7280;text-align:center;margin-bottom:22px}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;background:#fffbeb;padding:14px;border-radius:8px;margin-bottom:18px;font-size:14px;border-left:4px solid #f59e0b}
+.info-grid b{color:#92400e}
+table{width:100%;border-collapse:collapse;margin:10px 0 20px}
+th,td{padding:10px 12px;border:1px solid #d1d5db;font-size:14px}
+th{background:#f59e0b;color:white;text-align:left;font-weight:600}
+.obs{background:#fef3c7;padding:12px;border-radius:6px;font-size:12px;margin-top:10px;color:#92400e}
+.footer{margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center}
+.no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#f59e0b;color:white;border:none;border-radius:6px;cursor:pointer;z-index:100}
+@media print{
+  @page{size:A4 portrait;margin:10mm}
+  body{background:white;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .page{margin:0;padding:0;box-shadow:none;max-width:100%;width:100%}
+  .no-print{display:none}
+  thead{display:table-header-group}
+  tr{page-break-inside:avoid}
+}
+</style></head><body>
+<button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
+<div class="page">
+  <div class="header"><img src="logo.png" class="logo" />${antetFirma}</div>
+
+  <div class="title">NECESAR MATERIALE / ${fmtDate(dataGenerare)}</div>
+  <div class="subtitle">Estimare pentru aprovizionare instalații electrice</div>
+
+  <div class="info-grid">
+    <div><b>Beneficiar:</b> ${beneficiar}</div>
+    <div><b>Executant:</b> ${state.firmaNume || 'iFort Systems SRL'}</div>
+    <div style="grid-column:1/-1"><b>Adresa obiectiv:</b> ${adresa}</div>
+    <div><b>Bază calcul:</b> ${rez.zileBaza} zile cu consum</div>
+    <div><b>Proiectat pentru:</b> ${zp} zile lucrate</div>
+    <div><b>Interval bază:</b> ${rez.intervalBaza}</div>
+    <div><b>Marjă siguranță:</b> +${m}%</div>
+  </div>
+
+  <h3 style="font-size:14px;color:#92400e;margin-top:8px;margin-bottom:6px;border-bottom:1px solid #fde68a;padding-bottom:4px">Materiale necesare a fi comandate</h3>
+  <table>
+    <thead>
+      <tr><th style="width:40px;text-align:center">Nr.</th><th>Denumire material</th><th style="width:50px;text-align:center">UM</th><th style="width:110px;text-align:right">Cantitate</th><th style="width:120px;text-align:right">Ritm zilnic</th></tr>
+    </thead>
+    <tbody>${tableRows}</tbody>
+  </table>
+
+  <div class="obs">
+    <b>⚠️ Notă:</b> Cantitățile sunt estimate pe baza consumului mediu istoric (ultimele ${rez.zileBaza} zile cu activitate), proiectat pe ${zp} zile, cu marjă de siguranță +${m}%.
+    Verificați stocul existent înainte de plasarea comenzii.
+  </div>
+
+  <div class="footer">Document generat — ${state.firmaNume || 'iFort Systems SRL'} — ${fmtDate(dataGenerare)}</div>
+</div>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html); w.document.close();
+}
+
 function renderStoc() {
   // Default data = azi
   const dataInput = document.getElementById('aproData');

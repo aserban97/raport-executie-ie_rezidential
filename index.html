@@ -231,6 +231,30 @@
         <button type="button" class="btn-primary" id="btnAdaugaApro">+ Salvează aprovizionare</button>
       </div>
 
+      <h3>📦 Necesar materiale (pentru comandă furnizor)</h3>
+      <div class="card" style="border-left:4px solid #f59e0b">
+        <p class="small">Estimare bazată pe consumul mediu al ultimelor <b>5 zile lucrate</b>, proiectat pe <b>următoarele 5 zile</b>, cu marjă siguranță <b>+10%</b>.</p>
+        <div class="row" style="margin-bottom:8px">
+          <label>
+            Zile bază calcul (istoric)
+            <input type="number" id="necesarZileIstoric" value="5" min="1" max="30" />
+          </label>
+          <label>
+            Zile proiectate (necesar)
+            <input type="number" id="necesarZileProiect" value="5" min="1" max="30" />
+          </label>
+          <label>
+            Marjă siguranță (%)
+            <input type="number" id="necesarMarja" value="10" min="0" max="100" step="5" />
+          </label>
+        </div>
+        <div id="necesarPreview"></div>
+        <div class="actions" style="margin-top:8px">
+          <button type="button" class="btn-primary" id="btnNecesarRefresh">🔄 Recalculează</button>
+          <button type="button" class="btn-primary" id="btnNecesarPDF">📄 Generează necesar PDF</button>
+        </div>
+      </div>
+
       <h3>Stoc curent</h3>
       <div id="stocCurent" class="card"></div>
 
