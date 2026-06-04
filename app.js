@@ -637,6 +637,72 @@ function genereazaPDF(r, extern = false) {
   <div class="footer">Pagina ${idx + 2} — Document generat — iFort Systems S.R.L.</div>
 </div>`).join('');
 
+  // PAGINĂ PONTAJ (doar PDF intern, dacă există pontaj)
+  let pontajPage = '';
+  if (!extern && state.prezenta) {
+    const pontajZi = state.prezenta.filter(p => p.data === r.data && !p.absent && p.ore > 0);
+    if (pontajZi.length > 0) {
+      const echipeMap = {};
+      state.echipe.forEach(e => e.codMembri.forEach(c => { echipeMap[c] = e; }));
+      let totalOre = 0;
+      const rows = pontajZi.map(p => {
+        const m = state.muncitori.find(x => x.cod === p.cod);
+        const nume = m ? m.nume : '—';
+        const ech = echipeMap[p.cod];
+        const echHTML = ech ? `<span style="background:${ech.culoare};color:white;padding:1px 6px;border-radius:8px;font-size:10px">${ech.nume}</span>` : '—';
+        totalOre += p.ore;
+        return `<tr>
+          <td style="text-align:center">${p.cod}</td>
+          <td>${nume}</td>
+          <td style="text-align:center">${echHTML}</td>
+          <td style="text-align:center">${p.oraStart || '—'}</td>
+          <td style="text-align:center">${p.oraFinal || '—'}</td>
+          <td style="text-align:center">${p.pauza !== undefined ? p.pauza + 'h' : '1h'}</td>
+          <td style="text-align:right;font-weight:700">${p.ore.toFixed(1)}h</td>
+        </tr>`;
+      }).join('');
+      pontajPage = `
+<div class="page">
+  <div class="header">
+    <img src="logo.png" class="logo" alt="iFort" />
+    <div class="header-text">
+      <div class="company">iFort Systems S.R.L.</div>
+      <div class="sub">Pontaj zi — ${fmtDate(r.data)} (intern)</div>
+    </div>
+  </div>
+
+  <div class="info-grid">
+    <div><b>Data:</b> ${fmtDate(r.data)}</div>
+    <div><b>Program:</b> ${r.oraStart} — ${r.oraFinal}</div>
+    <div><b>Prezenți:</b> ${pontajZi.length} persoane</div>
+    <div><b>Total ore lucrate:</b> ${totalOre.toFixed(1)}h</div>
+  </div>
+
+  <h2>Pontaj prezență</h2>
+  <table>
+    <thead><tr>
+      <th style="text-align:center;width:50px">Cod</th>
+      <th>Nume</th>
+      <th style="text-align:center;width:80px">Echipa</th>
+      <th style="text-align:center;width:70px">Start</th>
+      <th style="text-align:center;width:70px">Final</th>
+      <th style="text-align:center;width:60px">Pauză</th>
+      <th style="text-align:right;width:80px">Ore</th>
+    </tr></thead>
+    <tbody>
+      ${rows}
+      <tr style="background:#f3f4f6;font-weight:700">
+        <td colspan="6" style="text-align:right">TOTAL</td>
+        <td style="text-align:right;color:#1e40af">${totalOre.toFixed(1)}h</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="footer">Document intern — iFort Systems S.R.L.</div>
+</div>`;
+    }
+  }
+
   // PAGINA finală: poze (dacă există)
   const pozePage = r.poze && r.poze.length > 0 ? `
 <div class="page">
@@ -685,6 +751,7 @@ th{background:#f3f4f6;text-align:left;font-weight:600}
 <button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
 ${totalPage}
 ${apartPages}
+${pontajPage}
 ${pozePage}
 </body></html>`;
 
@@ -2130,6 +2197,163 @@ function renderSumarPrezenta() {
 }
 
 document.getElementById('sumarLuna').addEventListener('change', renderSumarPrezenta);
+
+// ===== PONTAJ LUNAR PDF (matrice) =====
+document.getElementById('btnPontajLunarPDF').addEventListener('click', () => {
+  const luna = document.getElementById('sumarLuna').value;
+  if (!luna) { toast('Selectează o lună'); return; }
+  const [an, lunaNr] = luna.split('-').map(Number);
+  const ultimaZi = new Date(an, lunaNr, 0).getDate();
+  const start = `${luna}-01`;
+  const end = `${luna}-${String(ultimaZi).padStart(2, '0')}`;
+  const lunaNume = new Date(an, lunaNr - 1, 1).toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
+
+  // Muncitorii activi cel puțin 1 zi în lună
+  const muncitoriLuna = state.muncitori.filter(m =>
+    m.dataStart <= end && (!m.dataEnd || m.dataEnd >= start)
+  ).sort((a, b) => a.cod.localeCompare(b.cod));
+
+  if (muncitoriLuna.length === 0) {
+    toast('Niciun muncitor în această lună');
+    return;
+  }
+
+  // Echipe map
+  const echipeMap = {};
+  state.echipe.forEach(e => e.codMembri.forEach(c => { echipeMap[c] = e; }));
+
+  // Prezența lunii: { 'cod-yyyy-mm-dd': ore } + flag absent
+  const prez = {};
+  state.prezenta.filter(p => p.data >= start && p.data <= end).forEach(p => {
+    prez[`${p.cod}-${p.data}`] = p;
+  });
+
+  // Identifică weekend
+  function isWeekend(zi) {
+    const d = new Date(an, lunaNr - 1, zi);
+    return d.getDay() === 0 || d.getDay() === 6;
+  }
+
+  // Header tabel: Nr | Cod | Nume | Echipa | Z1 ... Zn | Total
+  let header = '<tr>';
+  header += '<th style="padding:4px;font-size:9px">Cod</th>';
+  header += '<th style="padding:4px;font-size:9px;text-align:left">Nume</th>';
+  header += '<th style="padding:4px;font-size:9px">Echipa</th>';
+  for (let z = 1; z <= ultimaZi; z++) {
+    const we = isWeekend(z) ? 'background:#fef3c7' : '';
+    header += `<th style="padding:2px;font-size:9px;text-align:center;width:22px;${we}">${z}</th>`;
+  }
+  header += '<th style="padding:4px;font-size:10px;text-align:right;background:#e0e7ff">Total</th>';
+  header += '</tr>';
+
+  // Rânduri per muncitor
+  let totalGeneralOre = 0;
+  const totalPerZi = new Array(ultimaZi + 1).fill(0);
+  let rows = '';
+  muncitoriLuna.forEach(m => {
+    const ech = echipeMap[m.cod];
+    let totalMuncitor = 0;
+    let celule = '';
+    for (let z = 1; z <= ultimaZi; z++) {
+      const dataZi = `${luna}-${String(z).padStart(2, '0')}`;
+      const p = prez[`${m.cod}-${dataZi}`];
+      const we = isWeekend(z) ? 'background:#fef9c3' : '';
+      if (!p) {
+        celule += `<td style="text-align:center;padding:2px;font-size:9px;color:#d1d5db;${we}">-</td>`;
+      } else if (p.absent) {
+        celule += `<td style="text-align:center;padding:2px;font-size:9px;color:#dc2626;font-weight:700;${we}">A</td>`;
+      } else if (p.ore > 0) {
+        totalMuncitor += p.ore;
+        totalPerZi[z] += p.ore;
+        const ore = p.ore === Math.floor(p.ore) ? p.ore.toFixed(0) : p.ore.toFixed(1);
+        celule += `<td style="text-align:center;padding:2px;font-size:9px;color:#1e40af;${we}">${ore}</td>`;
+      } else {
+        celule += `<td style="text-align:center;padding:2px;font-size:9px;color:#d1d5db;${we}">-</td>`;
+      }
+    }
+    totalGeneralOre += totalMuncitor;
+    const echHTML = ech ? `<span style="background:${ech.culoare};color:white;padding:1px 4px;border-radius:6px;font-size:9px">${ech.nume}</span>` : '—';
+    rows += `<tr>
+      <td style="padding:3px;font-size:10px;text-align:center;font-weight:700">${m.cod}</td>
+      <td style="padding:3px;font-size:10px">${m.nume}</td>
+      <td style="padding:3px;font-size:10px;text-align:center">${echHTML}</td>
+      ${celule}
+      <td style="padding:3px;font-size:11px;text-align:right;font-weight:700;background:#e0e7ff;color:#1e40af">${totalMuncitor.toFixed(1)}h</td>
+    </tr>`;
+  });
+  // Total per zi rând
+  let totalRow = `<tr style="background:#f3f4f6;font-weight:700">
+    <td colspan="3" style="padding:4px;text-align:right;font-size:10px">TOTAL zi</td>`;
+  for (let z = 1; z <= ultimaZi; z++) {
+    const we = isWeekend(z) ? 'background:#fef9c3' : '';
+    totalRow += `<td style="padding:2px;font-size:9px;text-align:center;${we}">${totalPerZi[z] > 0 ? totalPerZi[z].toFixed(0) : '-'}</td>`;
+  }
+  totalRow += `<td style="padding:4px;font-size:12px;text-align:right;background:#1e40af;color:white">${totalGeneralOre.toFixed(1)}h</td></tr>`;
+
+  // HTML complet
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="format-detection" content="telephone=no, date=no, address=no, email=no"><title>Pontaj ${lunaNume}</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
+a,a:link,a:visited{color:inherit !important;text-decoration:none !important}
+.page{background:white;padding:20px;max-width:100%;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1)}
+.header{display:flex;align-items:center;gap:14px;border-bottom:3px solid #1e40af;padding-bottom:8px;margin-bottom:12px}
+.header .logo{width:60px}
+.header-text .company{font-size:16px;font-weight:700;color:#1e40af}
+.header-text .sub{font-size:11px;color:#6b7280}
+.intern-badge{background:#dbeafe;color:#1e40af;padding:4px 10px;border-radius:6px;font-weight:600;font-size:11px;text-align:center;margin-bottom:8px;display:inline-block}
+.title{font-size:16px;font-weight:700;text-align:center;margin:4px 0;color:#1e40af}
+.subtitle{font-size:11px;color:#6b7280;text-align:center;margin-bottom:12px}
+.info-box{background:#f9fafb;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:11px;display:flex;gap:18px;flex-wrap:wrap}
+.info-box b{color:#1e40af}
+table{width:100%;border-collapse:collapse;margin:8px 0}
+th{background:#1e40af;color:white;border:1px solid #1e40af}
+td{border:1px solid #e5e7eb}
+.legend{font-size:10px;color:#6b7280;margin-top:6px;display:flex;gap:14px;flex-wrap:wrap}
+.legend-item{display:flex;align-items:center;gap:4px}
+.legend-cell{display:inline-block;padding:2px 6px;border-radius:3px;font-size:9px}
+.no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;z-index:100}
+.footer{margin-top:14px;padding-top:8px;border-top:1px solid #e5e7eb;font-size:10px;color:#9ca3af;text-align:center}
+@media print{
+  @page{size:A4 landscape;margin:8mm}
+  body{background:white}
+  .page{margin:0;padding:0;box-shadow:none}
+  .no-print{display:none}
+  -webkit-print-color-adjust:exact;print-color-adjust:exact
+}
+</style></head><body>
+<button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
+<div class="page">
+  <div class="intern-badge">📊 DOCUMENT INTERN — arhivă firmă</div>
+  <div class="header"><img src="logo.png" class="logo" /><div class="header-text"><div class="company">${state.firmaNume || 'iFort Systems SRL'}</div><div class="sub">Pontaj lunar — ${state.santier || 'Corallis'}</div></div></div>
+
+  <div class="title">PONTAJ ${lunaNume.toUpperCase()}</div>
+  <div class="subtitle">Generat: ${fmtDate(todayISO())}</div>
+
+  <div class="info-box">
+    <div><b>Muncitori activi:</b> ${muncitoriLuna.length}</div>
+    <div><b>Zile lunare:</b> ${ultimaZi}</div>
+    <div><b>Total ore lucrate:</b> ${totalGeneralOre.toFixed(1)}h</div>
+  </div>
+
+  <table>
+    <thead>${header}</thead>
+    <tbody>${rows}${totalRow}</tbody>
+  </table>
+
+  <div class="legend">
+    <div class="legend-item"><span class="legend-cell" style="background:#fef9c3">XX</span> Weekend</div>
+    <div class="legend-item"><span class="legend-cell" style="background:#fee2e2;color:#dc2626;font-weight:700">A</span> Absent</div>
+    <div class="legend-item"><span class="legend-cell" style="color:#d1d5db">-</span> Fără pontaj</div>
+    <div class="legend-item"><span class="legend-cell" style="color:#1e40af">8.5</span> Ore lucrate</div>
+  </div>
+
+  <div class="footer">Document intern — ${state.firmaNume || 'iFort Systems SRL'} — generat ${fmtDate(todayISO())}</div>
+</div>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html); w.document.close();
+});
 
 document.getElementById('btnExportPrezenta').addEventListener('click', () => {
   const luna = document.getElementById('sumarLuna').value;
