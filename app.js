@@ -4,17 +4,29 @@
 const STORAGE_KEY = 'ifort_raport_ie_v1';
 
 const MATERIALE_DEFAULT = [
-  { id: 'tub20', nume: 'Tub PVC D20 IPEY', um: 'm' },
-  { id: 'cot20', nume: 'Cot 90° 20mm', um: 'buc' },
-  { id: 'clema20', nume: 'Clemă 20mm', um: 'buc' },
-  { id: 'manson20', nume: 'Manșon 20mm', um: 'buc' },
-  { id: 'cyyf15', nume: 'Cablu CYYF 3x1.5 mmp', um: 'm' },
-  { id: 'cyyf25', nume: 'Cablu CYYF 3x2.5 mmp', um: 'm' },
-  { id: 'cyyf4', nume: 'Cablu CYYF 3x4 mmp', um: 'm' },
-  { id: 'cyyf6', nume: 'Cablu CYYF 3x6 mmp', um: 'm' },
-  { id: 'cablu_4x15', nume: 'Cablu CYYF 4x1.5 mmp', um: 'm' },
-  { id: 'dibluri', nume: 'Dibluri', um: 'buc' },
-  { id: 'suruburi', nume: 'Șuruburi', um: 'buc' },
+  { id: 'tub20', nume: 'Tub PVC D20 IPEY', um: 'm', pretEur: 1.15 },
+  { id: 'cot20', nume: 'Cot 90° 20mm', um: 'buc', pretEur: 0 },
+  { id: 'clema20', nume: 'Clemă 20mm', um: 'buc', pretEur: 0 },
+  { id: 'manson20', nume: 'Manșon 20mm', um: 'buc', pretEur: 0 },
+  { id: 'cyyf15', nume: 'Cablu CYYF 3x1.5 mmp', um: 'm', pretEur: 0.99 },
+  { id: 'cyyf25', nume: 'Cablu CYYF 3x2.5 mmp', um: 'm', pretEur: 1.00 },
+  { id: 'cyyf4', nume: 'Cablu CYYF 3x4 mmp', um: 'm', pretEur: 1.40 },
+  { id: 'cyyf6', nume: 'Cablu CYYF 3x6 mmp', um: 'm', pretEur: 1.54 },
+  { id: 'cablu_4x15', nume: 'Cablu CYYF 4x1.5 mmp', um: 'm', pretEur: 0.99 },
+  { id: 'dibluri', nume: 'Dibluri', um: 'buc', pretEur: 0 },
+  { id: 'suruburi', nume: 'Șuruburi', um: 'buc', pretEur: 0 },
+  // Adăugate pentru viitor (nu apar la rapoarte zilnice până nu le folosești)
+  { id: 'cablu_5x25', nume: 'Cablu CYYF 5x2.5 mmp', um: 'm', pretEur: 1.06 },
+  { id: 'cablu_4x4', nume: 'Cablu CYYF 4x4 mmp', um: 'm', pretEur: 0 },
+  { id: 'cablu_5x4', nume: 'Cablu CYYF 5x4 mmp', um: 'm', pretEur: 1.54 },
+  { id: 'cablu_4x6', nume: 'Cablu CYYF 4x6 mmp', um: 'm', pretEur: 0 },
+  { id: 'cablu_5x6', nume: 'Cablu CYYF 5x6 mmp', um: 'm', pretEur: 1.66 },
+  { id: 'cablu_3x10', nume: 'Cablu CYYF 3x10 mmp', um: 'm', pretEur: 1.84 },
+  { id: 'cablu_4x10', nume: 'Cablu CYYF 4x10 mmp', um: 'm', pretEur: 0 },
+  { id: 'cablu_4x16', nume: 'Cablu CYYF 4x16 mmp', um: 'm', pretEur: 0 },
+  { id: 'cablu_5x16', nume: 'Cablu CYYF 5x16 mmp', um: 'm', pretEur: 1.95 },
+  { id: 'cablu_4x240_120', nume: 'Cablu CYYF 4x240+120', um: 'm', pretEur: 13 },
+  { id: 'doza_der_100', nume: 'Doză derivație 100x100x40', um: 'buc', pretEur: 7 },
 ];
 
 let state = {
@@ -75,6 +87,8 @@ function load() {
       // FORȚEAZĂ update denumire și UM (sursa adevărului = MATERIALE_DEFAULT)
       existing.nume = def.nume;
       existing.um = def.um;
+      // Preț: setează doar dacă nu există deja (păstrează editările utilizatorului)
+      if (existing.pretEur === undefined) existing.pretEur = def.pretEur || 0;
     }
   });
   // Migrare defensivă pentru materiale custom (cabluri adăugate manual cu denumiri vechi)
@@ -880,10 +894,32 @@ function renderSetari() {
     `;
     row.querySelector('.btn-del').addEventListener('click', () => {
       if (!confirm(`Ștergi "${m.nume}"?`)) return;
-      state.materiale.splice(i, 1); save(); renderSetari(); renderMateriale();
+      state.materiale.splice(i, 1); save(); renderSetari();
     });
     cont.appendChild(row);
   });
+
+  // Editor prețuri
+  const contPret = document.getElementById('preturiMaterialeAdmin');
+  if (contPret) {
+    contPret.innerHTML = '';
+    state.materiale.forEach((m) => {
+      const row = document.createElement('div');
+      row.className = 'material-row';
+      row.innerHTML = `
+        <span class="nume" style="flex:2">${m.nume}</span>
+        <input type="number" class="pret-input" data-id="${m.id}" step="0.01" min="0" value="${(m.pretEur ?? 0).toFixed(2)}" style="flex:1;max-width:90px" />
+        <span class="um">EUR/${m.um}</span>
+      `;
+      row.querySelector('.pret-input').addEventListener('change', (e) => {
+        const v = parseFloat(e.target.value) || 0;
+        m.pretEur = v;
+        save();
+        toast(`${m.nume}: ${v.toFixed(2)} EUR ✓`);
+      });
+      contPret.appendChild(row);
+    });
+  }
 }
 
 document.getElementById('formMaterial').addEventListener('submit', (e) => {
@@ -2278,7 +2314,7 @@ function durataApartament(cod) {
 
 // ============= SITUAȚII DE LUCRĂRI =============
 // Materialele care apar în Situații (NUMAI tub + cabluri, ordine fixă)
-const MATERIALE_SITUATIE = ['cyyf15', 'cyyf25', 'cyyf4', 'cyyf6', 'cablu_4x15', 'tub20'];
+const MATERIALE_SITUATIE = ['cyyf15', 'cablu_4x15', 'cyyf25', 'cablu_5x25', 'cyyf4', 'cablu_4x4', 'cablu_5x4', 'cyyf6', 'cablu_4x6', 'cablu_5x6', 'cablu_3x10', 'cablu_4x10', 'cablu_4x16', 'cablu_5x16', 'cablu_4x240_120', 'tub20', 'doza_der_100'];
 
 function calculeazaCantitatiInterval(startISO, endISO) {
   const cantitati = {};
@@ -2467,9 +2503,18 @@ function genereazaSituatiePDF(s, isPreview = false) {
     .map(id => ({ id, mat: state.materiale.find(m => m.id === id), val: s.cantitati[id] || 0 }))
     .filter(x => x.mat && x.val > 0);
 
+  // Calcul preț total per linie + total general
+  let totalEur = 0;
+  linii.forEach(l => {
+    l.pret = l.mat.pretEur || 0;
+    l.total = l.val * l.pret;
+    totalEur += l.total;
+  });
+
   const tableRows = linii.map((l, i) =>
-    `<tr><td style="text-align:center">${i + 1}</td><td>${l.mat.nume}</td><td style="text-align:center">${l.mat.um}</td><td style="text-align:right;font-weight:700">${Math.round(l.val)}</td></tr>`
+    `<tr><td style="text-align:center">${i + 1}</td><td>${l.mat.nume}</td><td style="text-align:center">${l.mat.um}</td><td style="text-align:right;font-weight:700">${Math.round(l.val)}</td><td style="text-align:right">${l.pret.toFixed(2)}</td><td style="text-align:right;font-weight:700">${l.total.toFixed(2)}</td></tr>`
   ).join('');
+  const totalRowEur = `<tr style="background:#f3f4f6;font-weight:700;font-size:13px"><td colspan="5" style="text-align:right">TOTAL EUR</td><td style="text-align:right;color:#1e40af">${totalEur.toFixed(2)}</td></tr>`;
 
   // Detaliu pe zile — sumar compact pentru verificare
   // Materialele utilizate (cu val > 0) — ordinea din MATERIALE_SITUATIE
@@ -2595,9 +2640,9 @@ tfoot td{background:#f3f4f6;font-weight:700;font-size:15px}
   <h3 style="font-size:14px;color:#1e40af;margin-top:8px;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:4px">Cantități executate de iFort Systems SRL în perioada raportată</h3>
   <table>
     <thead>
-      <tr><th style="width:50px;text-align:center">Nr.</th><th>Denumire material</th><th style="width:60px;text-align:center">UM</th><th style="width:140px;text-align:right">Cantitate executată</th></tr>
+      <tr><th style="width:40px;text-align:center">Nr.</th><th>Denumire material</th><th style="width:50px;text-align:center">UM</th><th style="width:100px;text-align:right">Cantitate</th><th style="width:90px;text-align:right">Preț unitar (EUR)</th><th style="width:100px;text-align:right">Preț total (EUR)</th></tr>
     </thead>
-    <tbody>${tableRows}</tbody>
+    <tbody>${tableRows}${totalRowEur}</tbody>
   </table>
 
   ${tabelZilnic}
@@ -2647,10 +2692,15 @@ function genereazaSituatieExcel(s, isPreview = false) {
   csv += `Adresa obiectiv:,"${adresa}"\n`;
   csv += `Perioada:,${fmtDate(s.dataStart)} - ${fmtDate(s.dataEnd)}\n`;
   csv += `\n`;
-  csv += `Nr.,Denumire,UM,Cantitate\n`;
+  csv += `Nr.,Denumire,UM,Cantitate,Pret unitar (EUR),Pret total (EUR)\n`;
+  let totalEur = 0;
   linii.forEach((l, i) => {
-    csv += `${i + 1},"${l.mat.nume}",${l.mat.um},${Math.round(l.val)}\n`;
+    const pret = l.mat.pretEur || 0;
+    const total = l.val * pret;
+    totalEur += total;
+    csv += `${i + 1},"${l.mat.nume}",${l.mat.um},${Math.round(l.val)},${pret.toFixed(2)},${total.toFixed(2)}\n`;
   });
+  csv += `,,,,TOTAL EUR,${totalEur.toFixed(2)}\n`;
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -2678,9 +2728,14 @@ function genereazaSituatieInternPDF() {
     .map(id => ({ id, mat: state.materiale.find(m => m.id === id), val: cantitati[id] || 0 }))
     .filter(x => x.mat && x.val > 0);
 
-  const tableRows = linii.map((l, i) =>
-    `<tr><td style="text-align:center">${i + 1}</td><td>${l.mat.nume}</td><td style="text-align:center">${l.mat.um}</td><td style="text-align:right;font-weight:700">${Math.round(l.val)}</td></tr>`
-  ).join('');
+  let totalEur = 0;
+  const tableRows = linii.map((l, i) => {
+    const pret = l.mat.pretEur || 0;
+    const total = l.val * pret;
+    totalEur += total;
+    return `<tr><td style="text-align:center">${i + 1}</td><td>${l.mat.nume}</td><td style="text-align:center">${l.mat.um}</td><td style="text-align:right;font-weight:700">${Math.round(l.val)}</td><td style="text-align:right">${pret.toFixed(2)}</td><td style="text-align:right;font-weight:700">${total.toFixed(2)}</td></tr>`;
+  }).join('');
+  const totalRowEur = `<tr style="background:#f3f4f6;font-weight:700;font-size:13px"><td colspan="5" style="text-align:right">TOTAL EUR</td><td style="text-align:right;color:#1e40af">${totalEur.toFixed(2)}</td></tr>`;
 
   // Tabel detaliu per apartament
   const materialeUtilizate = MATERIALE_SITUATIE.filter(id => cantitati[id] > 0);
@@ -2744,8 +2799,8 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600}
 
   <h2>1. Total cantități executate de iFort Systems SRL</h2>
   <table>
-    <thead><tr><th style="width:50px;text-align:center">Nr.</th><th>Denumire material</th><th style="width:60px;text-align:center">UM</th><th style="width:140px;text-align:right">Cantitate executată</th></tr></thead>
-    <tbody>${tableRows}</tbody>
+    <thead><tr><th style="width:40px;text-align:center">Nr.</th><th>Denumire material</th><th style="width:50px;text-align:center">UM</th><th style="width:80px;text-align:right">Cantitate</th><th style="width:80px;text-align:right">Preț unitar (EUR)</th><th style="width:90px;text-align:right">Preț total (EUR)</th></tr></thead>
+    <tbody>${tableRows}${totalRowEur}</tbody>
   </table>
 
   <h2>2. Detaliu cantități per apartament</h2>
@@ -2802,11 +2857,18 @@ function genereazaSituatieInternExcel() {
   csv += `Perioada:,${fmtDate(dataStart)} - ${fmtDate(dataEnd)}\n\n`;
 
   csv += `1. Total cantitati executate\n`;
-  csv += `Nr.,Denumire,UM,Cantitate\n`;
+  csv += `Nr.,Denumire,UM,Cantitate,Pret unitar (EUR),Pret total (EUR)\n`;
   const linii = MATERIALE_SITUATIE
     .map(id => ({ id, mat: state.materiale.find(m => m.id === id), val: cantitati[id] || 0 }))
     .filter(x => x.mat && x.val > 0);
-  linii.forEach((l, i) => csv += `${i + 1},"${l.mat.nume}",${l.mat.um},${Math.round(l.val)}\n`);
+  let totalEurInt = 0;
+  linii.forEach((l, i) => {
+    const pret = l.mat.pretEur || 0;
+    const total = l.val * pret;
+    totalEurInt += total;
+    csv += `${i + 1},"${l.mat.nume}",${l.mat.um},${Math.round(l.val)},${pret.toFixed(2)},${total.toFixed(2)}\n`;
+  });
+  csv += `,,,,TOTAL EUR,${totalEurInt.toFixed(2)}\n`;
   csv += `\n`;
 
   csv += `2. Detaliu per apartament\n`;
