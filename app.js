@@ -5,6 +5,7 @@ const STORAGE_KEY = 'ifort_raport_ie_v1';
 
 const MATERIALE_DEFAULT = [
   { id: 'tub20', nume: 'Tub PVC D20 IPEY', um: 'm', pretEur: 1.15 },
+  { id: 'copex20', nume: 'Copex D20mm', um: 'm', pretEur: 0 },
   { id: 'cot20', nume: 'Cot 90° 20mm', um: 'buc', pretEur: 0 },
   { id: 'clema20', nume: 'Clemă 20mm', um: 'buc', pretEur: 0 },
   { id: 'manson20', nume: 'Manșon 20mm', um: 'buc', pretEur: 0 },
