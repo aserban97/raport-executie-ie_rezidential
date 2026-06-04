@@ -9,6 +9,8 @@
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
+  <!-- MSAL pentru OneDrive sync -->
+  <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 </head>
 <body>
   <header class="app-header">
@@ -511,6 +513,20 @@
     <!-- TAB: SETARI -->
     <section id="tab-setari" class="tab-panel">
       <h2>Setări</h2>
+
+      <!-- ONEDRIVE SYNC — SUS, VIZIBIL -->
+      <div class="card" id="cardOneDrive" style="border-left:4px solid #0078d4">
+        <h3>☁️ Sincronizare OneDrive (Microsoft)</h3>
+        <p class="small" id="odStatus">Verificare status...</p>
+        <div class="actions" id="odActions">
+          <button type="button" class="btn-primary" id="btnODLogin">🔐 Login Microsoft</button>
+          <button type="button" class="btn-secondary" id="btnODLogout" style="display:none">Logout</button>
+          <button type="button" class="btn-secondary" id="btnODSyncNow" style="display:none">🔄 Sincronizează acum</button>
+          <button type="button" class="btn-secondary" id="btnODPullCloud" style="display:none">⬇️ Încarcă din OneDrive</button>
+        </div>
+        <p class="small" id="odUltimaSync" style="margin-top:8px;color:#6b7280"></p>
+      </div>
+
       <div class="card">
         <h3>Materiale</h3>
         <div id="listaMaterialeAdmin"></div>

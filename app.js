@@ -52,6 +52,8 @@ let state = {
   contractInfo: '', // ex: "Contract nr. 123 / 01.01.2026"
   prefixSituatie: 'SL-2026-', // pentru numerotare
   contorBackup: 0, // câte rapoarte de la ultimul backup auto
+  ultimaSyncOD: null, // timestamp ultima sincronizare OneDrive
+  versiuneState: 0, // contor incrementat la fiecare save — pentru a detecta conflicte
 };
 
 let raportEditareId = null; // ID raport în editare (null = nou)
@@ -102,7 +104,14 @@ function load() {
   });
   save();
 }
-function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function save() {
+  state.versiuneState = (state.versiuneState || 0) + 1;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  // Trigger sync OneDrive (debounced — așteaptă 3s de inactivitate înainte de upload)
+  if (typeof OneDrive !== 'undefined' && OneDrive.scheduleAutoSync) {
+    OneDrive.scheduleAutoSync();
+  }
+}
 
 // ============= Helpers =============
 function toast(msg) {
@@ -4065,6 +4074,311 @@ renderKPI = function () {
   renderDurataPerTip();
   renderPredictieProiect();
 };
+
+// ============= ONEDRIVE SYNC (Microsoft Graph) =============
+const OneDrive = (function () {
+  const MSAL_CONFIG = {
+    auth: {
+      clientId: 'dcccb5ef-66db-4d8c-adfb-6ca291a0b7b1',
+      authority: 'https://login.microsoftonline.com/common',
+      redirectUri: location.origin + location.pathname,
+    },
+    cache: {
+      cacheLocation: 'localStorage',
+      storeAuthStateInCookie: false,
+    },
+  };
+  const SCOPES = ['Files.ReadWrite.AppFolder', 'offline_access', 'User.Read'];
+  const FILE_NAME = 'ifort-date-aplicatie.json';
+  // AppFolder API folosește calea specială "approot:"
+  const FILE_PATH = `/me/drive/special/approot:/${FILE_NAME}:/content`;
+  const FILE_META_PATH = `/me/drive/special/approot:/${FILE_NAME}`;
+
+  let msalInstance = null;
+  let account = null;
+  let isInitialized = false;
+  let syncTimer = null;
+  let isSyncing = false;
+  let lastFileEtag = null;
+
+  function setStatus(msg, color) {
+    const el = document.getElementById('odStatus');
+    if (el) {
+      el.textContent = msg;
+      el.style.color = color || '#6b7280';
+    }
+  }
+
+  function updateUI() {
+    const loginBtn = document.getElementById('btnODLogin');
+    const logoutBtn = document.getElementById('btnODLogout');
+    const syncBtn = document.getElementById('btnODSyncNow');
+    const pullBtn = document.getElementById('btnODPullCloud');
+    const ultimaSyncEl = document.getElementById('odUltimaSync');
+
+    if (account) {
+      if (loginBtn) loginBtn.style.display = 'none';
+      if (logoutBtn) logoutBtn.style.display = '';
+      if (syncBtn) syncBtn.style.display = '';
+      if (pullBtn) pullBtn.style.display = '';
+      setStatus(`✅ Conectat: ${account.username}`, '#10b981');
+      if (state.ultimaSyncOD && ultimaSyncEl) {
+        const d = new Date(state.ultimaSyncOD);
+        ultimaSyncEl.textContent = `Ultima sincronizare: ${d.toLocaleString('ro-RO')}`;
+      }
+    } else {
+      if (loginBtn) loginBtn.style.display = '';
+      if (logoutBtn) logoutBtn.style.display = 'none';
+      if (syncBtn) syncBtn.style.display = 'none';
+      if (pullBtn) pullBtn.style.display = 'none';
+      setStatus('🔒 Neconectat la OneDrive. Datele sunt doar pe acest dispozitiv.', '#dc2626');
+    }
+  }
+
+  async function init() {
+    if (isInitialized) return;
+    if (typeof msal === 'undefined') {
+      setStatus('⚠️ Biblioteca MSAL nu s-a încărcat (verifică internet)', '#dc2626');
+      return;
+    }
+    try {
+      msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
+      await msalInstance.initialize();
+      // Verifică dacă există deja un cont logat
+      const accounts = msalInstance.getAllAccounts();
+      if (accounts.length > 0) {
+        account = accounts[0];
+      }
+      // Handle redirect response (după login)
+      try {
+        const result = await msalInstance.handleRedirectPromise();
+        if (result && result.account) {
+          account = result.account;
+        }
+      } catch (e) { console.warn('Redirect handle:', e); }
+      isInitialized = true;
+      updateUI();
+      // Auto-pull la inițializare dacă suntem logați
+      if (account) {
+        await tryAutoPull();
+      }
+    } catch (e) {
+      console.error('MSAL init error:', e);
+      setStatus('❌ Eroare inițializare MSAL: ' + e.message, '#dc2626');
+    }
+  }
+
+  async function login() {
+    if (!isInitialized) await init();
+    if (!msalInstance) return;
+    try {
+      setStatus('🔄 Se deschide fereastra login...', '#1e40af');
+      // Pe iPhone PWA pop-up-urile pot fi blocate → folosim redirect
+      const isPWA = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+      if (isPWA) {
+        // Redirect (după login va reveni la aplicație)
+        await msalInstance.loginRedirect({ scopes: SCOPES, prompt: 'select_account' });
+        // Funcția se oprește aici — pagina face redirect
+      } else {
+        const result = await msalInstance.loginPopup({ scopes: SCOPES, prompt: 'select_account' });
+        account = result.account;
+        msalInstance.setActiveAccount(account);
+        updateUI();
+        toast('Conectat cu succes ✓');
+        await tryAutoPull();
+      }
+    } catch (e) {
+      console.error('Login error:', e);
+      toast('Eroare login: ' + (e.errorMessage || e.message));
+      setStatus('❌ Login eșuat: ' + (e.errorMessage || e.message), '#dc2626');
+    }
+  }
+
+  async function logout() {
+    if (!msalInstance || !account) return;
+    if (!confirm('Te deloghezi din OneDrive? Datele rămân pe acest dispozitiv, dar nu se mai sincronizează.')) return;
+    try {
+      await msalInstance.logoutPopup({ account });
+      account = null;
+      updateUI();
+      toast('Delogat');
+    } catch (e) {
+      console.error('Logout error:', e);
+    }
+  }
+
+  async function getAccessToken() {
+    if (!account) throw new Error('Nu ești logat');
+    try {
+      const result = await msalInstance.acquireTokenSilent({ scopes: SCOPES, account });
+      return result.accessToken;
+    } catch (e) {
+      // Token expirat → re-login interactiv
+      console.warn('Silent token failed, falling back to popup:', e);
+      const result = await msalInstance.acquireTokenPopup({ scopes: SCOPES, account });
+      return result.accessToken;
+    }
+  }
+
+  async function uploadToOneDrive() {
+    if (!account) { toast('Nu ești logat în OneDrive'); return false; }
+    if (isSyncing) { console.log('Deja în sync'); return false; }
+    isSyncing = true;
+    setStatus('🔄 Se sincronizează...', '#1e40af');
+    try {
+      const token = await getAccessToken();
+      const json = JSON.stringify(state, null, 2);
+      const resp = await fetch(`https://graph.microsoft.com${FILE_PATH}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: json,
+      });
+      if (!resp.ok) {
+        const errTxt = await resp.text();
+        throw new Error(`HTTP ${resp.status}: ${errTxt}`);
+      }
+      const meta = await resp.json();
+      lastFileEtag = meta.eTag;
+      state.ultimaSyncOD = new Date().toISOString();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      updateUI();
+      console.log('✅ Sync OneDrive OK', meta);
+      toast('💾 Salvat în OneDrive ✓');
+      return true;
+    } catch (e) {
+      console.error('Upload error:', e);
+      setStatus('❌ Eroare sincronizare: ' + e.message, '#dc2626');
+      toast('Eroare sync: ' + e.message);
+      return false;
+    } finally {
+      isSyncing = false;
+    }
+  }
+
+  async function downloadFromOneDrive() {
+    if (!account) { toast('Nu ești logat'); return null; }
+    try {
+      const token = await getAccessToken();
+      // Verifică dacă fișierul există
+      const metaResp = await fetch(`https://graph.microsoft.com/v1.0${FILE_META_PATH}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (metaResp.status === 404) {
+        console.log('Fișier inexistent în OneDrive — primul upload');
+        return null;
+      }
+      if (!metaResp.ok) throw new Error('Eroare metadata: ' + metaResp.status);
+      const meta = await metaResp.json();
+      lastFileEtag = meta.eTag;
+      // Descarcă conținutul
+      const contentResp = await fetch(`https://graph.microsoft.com${FILE_PATH}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!contentResp.ok) throw new Error('Eroare descărcare: ' + contentResp.status);
+      const data = await contentResp.json();
+      return { data, meta };
+    } catch (e) {
+      console.error('Download error:', e);
+      toast('Eroare descărcare: ' + e.message);
+      return null;
+    }
+  }
+
+  // La login/init: dacă cloud-ul are date mai noi decât localStorage → întreabă utilizatorul
+  async function tryAutoPull() {
+    if (!account) return;
+    setStatus('🔄 Verific OneDrive...', '#1e40af');
+    const cloud = await downloadFromOneDrive();
+    if (!cloud) {
+      // Niciun fișier în cloud — upload state actual
+      setStatus('☁️ Primul upload în OneDrive...', '#1e40af');
+      await uploadToOneDrive();
+      return;
+    }
+    const cloudVers = cloud.data.versiuneState || 0;
+    const localVers = state.versiuneState || 0;
+    const localGol = (!state.rapoarte || state.rapoarte.length === 0) && (!state.apartamente || state.apartamente.length === 0);
+    const cloudGol = (!cloud.data.rapoarte || cloud.data.rapoarte.length === 0) && (!cloud.data.apartamente || cloud.data.apartamente.length === 0);
+
+    if (cloudGol && !localGol) {
+      // Local are date, cloud gol → upload
+      await uploadToOneDrive();
+      return;
+    }
+    if (!cloudGol && localGol) {
+      // Cloud are date, local gol → înlocuim local cu cloud (fără întrebare — caz tipic device nou)
+      state = cloud.data;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      renderAll();
+      setStatus('✅ Date încărcate din OneDrive', '#10b981');
+      toast('📥 Date sincronizate din OneDrive');
+      updateUI();
+      return;
+    }
+    if (cloudVers > localVers) {
+      // Cloud mai nou — întreabă
+      if (confirm(`OneDrive are o versiune mai recentă (v${cloudVers}) decât cea locală (v${localVers}).\n\nÎnlocuiești datele locale cu cele din OneDrive?\n\nDA = înlocuiește (recomandat)\nNU = păstrează local (va suprascrie cloud-ul la următoarea salvare)`)) {
+        state = cloud.data;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        renderAll();
+        toast('📥 Date încărcate din OneDrive');
+      }
+    } else if (localVers > cloudVers) {
+      // Local mai nou → upload
+      await uploadToOneDrive();
+    } else {
+      setStatus('✅ Sincronizat (v' + localVers + ')', '#10b981');
+    }
+    updateUI();
+  }
+
+  function scheduleAutoSync() {
+    if (!account) return;
+    if (syncTimer) clearTimeout(syncTimer);
+    // Așteaptă 3 secunde de inactivitate înainte de upload (evită spam la editări rapide)
+    syncTimer = setTimeout(() => {
+      uploadToOneDrive();
+    }, 3000);
+  }
+
+  // Public API
+  return {
+    init,
+    login,
+    logout,
+    syncNow: uploadToOneDrive,
+    pullFromCloud: tryAutoPull,
+    forcePullFromCloud: async function () {
+      if (!account) { toast('Nu ești logat'); return; }
+      const cloud = await downloadFromOneDrive();
+      if (!cloud) { toast('Nu există date în OneDrive'); return; }
+      if (!confirm('Înlocuiești TOATE datele locale cu cele din OneDrive?')) return;
+      state = cloud.data;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      renderAll();
+      toast('Date încărcate din OneDrive ✓');
+      updateUI();
+    },
+    scheduleAutoSync,
+    isLoggedIn: () => !!account,
+  };
+})();
+
+// Wire UI events pentru OneDrive
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => OneDrive.init(), 500);
+  const bLogin = document.getElementById('btnODLogin');
+  const bLogout = document.getElementById('btnODLogout');
+  const bSync = document.getElementById('btnODSyncNow');
+  const bPull = document.getElementById('btnODPullCloud');
+  if (bLogin) bLogin.addEventListener('click', () => OneDrive.login());
+  if (bLogout) bLogout.addEventListener('click', () => OneDrive.logout());
+  if (bSync) bSync.addEventListener('click', () => OneDrive.syncNow());
+  if (bPull) bPull.addEventListener('click', () => OneDrive.forcePullFromCloud());
+});
 
 function init() {
   load();
