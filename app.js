@@ -1789,6 +1789,7 @@ function renderPersonal() {
   }
 
   renderListaMuncitoriPrezenta();
+  renderPontajEchipeRapid();
   renderMuncitoriActivi();
   renderMuncitoriIstoric();
   renderSumarPrezenta();
@@ -1805,6 +1806,114 @@ function muncitoriiActiviLaData(dataISO) {
   );
 }
 
+// Calculează ore lucrate efectiv (cu pauza scăzută)
+function calcOreLucrate(oraStart, oraFinal, pauza) {
+  if (!oraStart || !oraFinal) return 0;
+  const [h1, m1] = oraStart.split(':').map(Number);
+  const [h2, m2] = oraFinal.split(':').map(Number);
+  const start = h1 + m1 / 60;
+  const final = h2 + m2 / 60;
+  let total = final - start;
+  if (total < 0) total += 24; // în caz că trece miezul nopții
+  total -= (pauza || 0);
+  return Math.max(0, Math.round(total * 2) / 2); // pas 0.5h
+}
+
+function renderPontajEchipeRapid() {
+  const cont = document.getElementById('pontajEchipeRapid');
+  if (!cont) return;
+  const data = document.getElementById('pontajData').value || todayISO();
+  const activi = muncitoriiActiviLaData(data);
+  const echipeCuMembriActivi = state.echipe.filter(e =>
+    e.codMembri.some(cod => activi.some(m => m.cod === cod))
+  );
+  if (echipeCuMembriActivi.length === 0) { cont.innerHTML = ''; return; }
+  let html = '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-size:12px;color:#6b7280">Pontaj rapid:</span>';
+  echipeCuMembriActivi.forEach(e => {
+    html += `<button type="button" class="btn-secondary btn-pontaj-grup" data-echipa="${e.id}" style="font-size:12px;padding:6px 10px;border-left:3px solid ${e.culoare}">📋 Echipa ${e.nume} (07:30–17:00)</button>`;
+  });
+  html += '<button type="button" class="btn-secondary" id="btnPontajToti" style="font-size:12px;padding:6px 10px">📋 Toți (07:30–17:00)</button>';
+  html += '</div>';
+  cont.innerHTML = html;
+
+  cont.querySelectorAll('.btn-pontaj-grup').forEach(b => b.addEventListener('click', () => {
+    const e = state.echipe.find(x => x.id === b.dataset.echipa);
+    if (!e) return;
+    e.codMembri.forEach(cod => setPontajRapid(cod, '07:30', '17:00', 1, false));
+    actualizeazaSumarPontaj();
+    toast(`Echipa ${e.nume} pontaj 07:30–17:00 ✓`);
+  }));
+  const btnToti = document.getElementById('btnPontajToti');
+  if (btnToti) btnToti.addEventListener('click', () => {
+    activi.forEach(m => setPontajRapid(m.cod, '07:30', '17:00', 1, false));
+    actualizeazaSumarPontaj();
+    toast('Pontaj 07:30–17:00 pentru toți ✓');
+  });
+}
+
+function setPontajRapid(cod, oraStart, oraFinal, pauza, absent) {
+  const row = document.querySelector(`.pontaj-row[data-cod="${cod}"]`);
+  if (!row) return;
+  if (absent) {
+    row.querySelector('.pontaj-absent').checked = true;
+    row.querySelector('.pontaj-start').value = '';
+    row.querySelector('.pontaj-final').value = '';
+  } else {
+    row.querySelector('.pontaj-absent').checked = false;
+    row.querySelector('.pontaj-start').value = oraStart;
+    row.querySelector('.pontaj-final').value = oraFinal;
+    row.querySelector('.pontaj-pauza').value = pauza;
+  }
+  actualizeazaOreRand(row);
+}
+
+function actualizeazaOreRand(row) {
+  const absent = row.querySelector('.pontaj-absent').checked;
+  const start = row.querySelector('.pontaj-start').value;
+  const final = row.querySelector('.pontaj-final').value;
+  const pauza = parseFloat(row.querySelector('.pontaj-pauza').value) || 0;
+  const oreEl = row.querySelector('.pontaj-ore-calc');
+  if (absent) {
+    oreEl.textContent = 'absent';
+    oreEl.style.color = '#dc2626';
+    row.style.opacity = 0.5;
+  } else {
+    const ore = calcOreLucrate(start, final, pauza);
+    oreEl.textContent = ore > 0 ? `${ore.toFixed(1)}h` : '—';
+    oreEl.style.color = ore > 0 ? '#10b981' : '#9ca3af';
+    row.style.opacity = 1;
+  }
+}
+
+function actualizeazaSumarPontaj() {
+  const info = document.getElementById('pontajInfo');
+  if (!info) return;
+  const rows = document.querySelectorAll('.pontaj-row');
+  let totalOre = 0, totalPrezenti = 0;
+  rows.forEach(r => {
+    if (r.querySelector('.pontaj-absent').checked) return;
+    const start = r.querySelector('.pontaj-start').value;
+    const final = r.querySelector('.pontaj-final').value;
+    const pauza = parseFloat(r.querySelector('.pontaj-pauza').value) || 0;
+    const ore = calcOreLucrate(start, final, pauza);
+    if (ore > 0) { totalOre += ore; totalPrezenti++; }
+  });
+  info.innerHTML = `<b>Total:</b> ${totalPrezenti} prezenți × ore = <b style="color:#1e40af">${totalOre.toFixed(1)} ore lucrate</b>`;
+  // Validare vs raport zilnic
+  const data = document.getElementById('pontajData').value;
+  if (data && state.rapoarte) {
+    const raport = state.rapoarte.find(r => r.data === data);
+    if (raport) {
+      const nrEl = raport.nrElectricieni || 0;
+      if (nrEl !== totalPrezenti && totalPrezenti > 0) {
+        info.innerHTML += `<br><span style="color:#f59e0b">⚠️ Raportul zilei zice ${nrEl} electricieni, dar în pontaj ai ${totalPrezenti} prezenți</span>`;
+      } else if (nrEl === totalPrezenti && totalPrezenti > 0) {
+        info.innerHTML += ` <span style="color:#10b981">✓ Coincide cu raportul</span>`;
+      }
+    }
+  }
+}
+
 function renderListaMuncitoriPrezenta() {
   const cont = document.getElementById('listaMuncitoriPrezenta');
   const data = document.getElementById('pontajData').value || todayISO();
@@ -1816,36 +1925,98 @@ function renderListaMuncitoriPrezenta() {
     return;
   }
 
-  let html = '<div style="margin-top:10px">';
+  // Pentru fiecare muncitor: găsește echipa lui
+  function echipaMuncitorului(cod) {
+    return state.echipe.find(e => e.codMembri.includes(cod));
+  }
+
+  let html = '<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">';
   activi.forEach(m => {
     const p = prezentaZi.find(x => x.cod === m.cod);
-    const ore = p ? p.ore : '';
-    html += `<div class="apro-row" data-cod="${m.cod}">
-      <span class="nume"><b>${m.cod}</b> — ${m.nume}</span>
-      <input type="number" class="pontaj-ore" data-cod="${m.cod}" min="0" max="16" step="0.5" placeholder="ore" value="${ore}" style="max-width:90px" />
-      <span class="um">ore</span>
+    const oraStart = p?.oraStart || '';
+    const oraFinal = p?.oraFinal || '';
+    const pauza = p?.pauza !== undefined ? p.pauza : 1;
+    const absent = p?.absent || false;
+    const ech = echipaMuncitorului(m.cod);
+    const echBadge = ech ? `<span style="display:inline-block;background:${ech.culoare};color:white;font-size:10px;padding:1px 6px;border-radius:8px;margin-left:6px">${ech.nume}</span>` : '';
+
+    html += `<div class="pontaj-row" data-cod="${m.cod}" style="background:#f9fafb;padding:8px 10px;border-radius:6px;border-left:3px solid ${ech ? ech.culoare : '#9ca3af'}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-weight:600"><b>${m.cod}</b> ${m.nume}${echBadge}</span>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;margin:0">
+          <input type="checkbox" class="pontaj-absent" ${absent ? 'checked' : ''} />
+          Absent
+        </label>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 70px 60px;gap:6px;align-items:center">
+        <label style="font-size:11px;color:#6b7280;margin:0">Start
+          <input type="time" class="pontaj-start" value="${oraStart}" step="1800" style="margin-top:2px" />
+        </label>
+        <label style="font-size:11px;color:#6b7280;margin:0">Final
+          <input type="time" class="pontaj-final" value="${oraFinal}" step="1800" style="margin-top:2px" />
+        </label>
+        <label style="font-size:11px;color:#6b7280;margin:0">Pauză
+          <input type="number" class="pontaj-pauza" value="${pauza}" min="0" max="3" step="0.5" style="margin-top:2px" />
+        </label>
+        <div style="text-align:center;font-weight:700;font-size:14px" class="pontaj-ore-calc">—</div>
+      </div>
     </div>`;
   });
   html += '</div>';
   cont.innerHTML = html;
+
+  // Listeners pentru recalculare live
+  cont.querySelectorAll('.pontaj-row').forEach(row => {
+    actualizeazaOreRand(row);
+    row.querySelectorAll('input').forEach(inp => {
+      inp.addEventListener('change', () => {
+        actualizeazaOreRand(row);
+        actualizeazaSumarPontaj();
+      });
+    });
+  });
+  actualizeazaSumarPontaj();
 }
 
-document.getElementById('pontajData').addEventListener('change', renderListaMuncitoriPrezenta);
+document.getElementById('pontajData').addEventListener('change', () => {
+  renderListaMuncitoriPrezenta();
+  renderPontajEchipeRapid();
+});
 
 document.getElementById('btnSavePontaj').addEventListener('click', () => {
   const data = document.getElementById('pontajData').value || todayISO();
-  // Șterge prezența veche pentru data asta
   state.prezenta = state.prezenta.filter(p => p.data !== data);
-  // Adaugă nouă
-  document.querySelectorAll('.pontaj-ore').forEach(inp => {
-    const ore = parseFloat(inp.value);
+  let totalSalvat = 0;
+  document.querySelectorAll('.pontaj-row').forEach(row => {
+    const cod = row.dataset.cod;
+    const absent = row.querySelector('.pontaj-absent').checked;
+    const oraStart = row.querySelector('.pontaj-start').value;
+    const oraFinal = row.querySelector('.pontaj-final').value;
+    const pauza = parseFloat(row.querySelector('.pontaj-pauza').value) || 0;
+    if (absent) {
+      state.prezenta.push({ data, cod, ore: 0, absent: true });
+      return;
+    }
+    if (!oraStart || !oraFinal) return;
+    const ore = calcOreLucrate(oraStart, oraFinal, pauza);
     if (ore > 0) {
-      state.prezenta.push({ data, cod: inp.dataset.cod, ore });
+      state.prezenta.push({ data, cod, ore, oraStart, oraFinal, pauza });
+      totalSalvat++;
     }
   });
   save();
-  toast(`Pontaj salvat pentru ${fmtDate(data)} ✓`);
+  toast(`Pontaj salvat: ${totalSalvat} prezenți ✓`);
   renderSumarPrezenta();
+});
+
+const btnPontajClear = document.getElementById('btnPontajClear');
+if (btnPontajClear) btnPontajClear.addEventListener('click', () => {
+  const data = document.getElementById('pontajData').value || todayISO();
+  if (!confirm(`Ștergi pontajul pentru ${fmtDate(data)}?`)) return;
+  state.prezenta = state.prezenta.filter(p => p.data !== data);
+  save();
+  renderListaMuncitoriPrezenta();
+  toast('Pontaj șters ✓');
 });
 
 function renderMuncitoriActivi() {

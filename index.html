@@ -248,8 +248,14 @@
           Data
           <input type="date" id="pontajData" />
         </label>
+        <div id="pontajEchipeRapid" style="margin-bottom:10px"></div>
+        <p class="small">Pauza de masă (1h) e scăzută automat din total. Bifează "Absent" dacă cineva nu a venit.</p>
         <div id="listaMuncitoriPrezenta"></div>
-        <button type="button" class="btn-primary" id="btnSavePontaj">Salvează pontaj</button>
+        <div class="actions">
+          <button type="button" class="btn-primary" id="btnSavePontaj">💾 Salvează pontaj</button>
+          <button type="button" class="btn-secondary" id="btnPontajClear">🗑️ Golește zi</button>
+        </div>
+        <p class="small" id="pontajInfo" style="margin-top:8px"></p>
       </div>
 
       <h3>Listă muncitori</h3>
