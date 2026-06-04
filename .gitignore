@@ -1,0 +1,13 @@
+# Backup-uri și date sensibile — NU pe GitHub
+backup/
+*.backup.json
+ifort-backup-*.json
+ifort-RECUPERARE-*.json
+
+# Date PDF interne firma
+SL*.pdf
+Analiz*.pdf
+
+# Sistem
+.DS_Store
+Thumbs.db
