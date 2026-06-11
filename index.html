@@ -128,6 +128,41 @@
     <!-- TAB: APARTAMENTE -->
     <section id="tab-apartamente" class="tab-panel">
       <h2>Lista apartamente</h2>
+
+      <!-- RAPORT CONSOLIDAT toate apartamentele -->
+      <div class="card" style="border-left:4px solid #10b981">
+        <h3>📊 Raport consolidat toate apartamentele</h3>
+        <p class="small">Tabel sumar + detaliu per apartament. Cu filtre după stare și tip.</p>
+        <div class="row">
+          <label>
+            Filtru stare
+            <select id="filtruRapStare">
+              <option value="">Toate</option>
+              <option value="gata">Doar Finalizate</option>
+              <option value="in_lucru">Doar În lucru</option>
+              <option value="neinceput">Doar Neîncepute</option>
+              <option value="blocat">Doar Blocate</option>
+            </select>
+          </label>
+          <label>
+            Filtru tip
+            <select id="filtruRapTip">
+              <option value="">Toate tipurile</option>
+              <option value="2 camere">2 camere</option>
+              <option value="3 camere">3 camere</option>
+              <option value="4 camere">4 camere</option>
+              <option value="Penthouse">Penthouse</option>
+              <option value="Zona comuna">Zonă comună</option>
+            </select>
+          </label>
+        </div>
+        <p class="small" id="filtruRapInfo" style="margin-top:6px;color:#1e40af;font-weight:600"></p>
+        <div class="actions" style="margin-top:8px">
+          <button type="button" class="btn-primary" id="btnRapApartConsolidatPDF">📄 PDF consolidat</button>
+          <button type="button" class="btn-secondary" id="btnRapApartConsolidatExcel">📊 Excel consolidat</button>
+        </div>
+      </div>
+
       <div class="card">
         <div class="row">
           <label>

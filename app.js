@@ -5873,6 +5873,316 @@ function genereazaRaportApartamentExcel(cod) {
   toast('Excel descărcat ✓');
 }
 
+// ============= RAPORT CONSOLIDAT APARTAMENTE =============
+function filtreazaApartamenteRap() {
+  const stareFilt = document.getElementById('filtruRapStare')?.value || '';
+  const tipFilt = document.getElementById('filtruRapTip')?.value || '';
+  return state.apartamente.filter(a => {
+    if (stareFilt && (a.stare || 'neinceput') !== stareFilt) return false;
+    if (tipFilt && a.tip !== tipFilt) return false;
+    return true;
+  });
+}
+
+function updateFiltruRapInfo() {
+  const info = document.getElementById('filtruRapInfo');
+  if (!info) return;
+  const aps = filtreazaApartamenteRap();
+  const total = state.apartamente.length;
+  info.textContent = `${aps.length} apartamente selectate (din ${total} total)`;
+}
+
+function genereazaRaportConsolidatPDF() {
+  const aps = filtreazaApartamenteRap();
+  if (aps.length === 0) { toast('Niciun apartament cu filtrele alese'); return; }
+
+  const stareFilt = document.getElementById('filtruRapStare').value || '';
+  const tipFilt = document.getElementById('filtruRapTip').value || '';
+  const stareNume = { neinceput: 'Neînceput', in_lucru: 'În lucru', gata: 'Gata', blocat: 'Blocat' };
+  const stareCol = { neinceput: '#6b7280', in_lucru: '#f59e0b', gata: '#10b981', blocat: '#dc2626' };
+  const stareIcon = { neinceput: '⚪', in_lucru: '🟡', gata: '🟢', blocat: '🔴' };
+  const filtruText = (stareFilt ? `Stare: ${stareNume[stareFilt]}` : 'Toate stările') + ' • ' +
+                     (tipFilt ? `Tip: ${tipFilt}` : 'Toate tipurile');
+
+  // Colectez datele pentru fiecare apartament
+  const datele = aps.map(a => colecteazaApartament(a.cod));
+
+  // === TABEL SUMAR (Pagina 1) ===
+  let totalAps = 0, totalMp = 0, totalEur = 0, totalTub = 0, totalCablu = 0, totalOmZile = 0;
+  let sumarRows = '';
+  datele.forEach(d => {
+    const a = d.ap;
+    const stare = a.stare || 'neinceput';
+    const tubVal = d.totalMat.tub20 || 0;
+    let cabluVal = 0;
+    Object.entries(d.totalMat).forEach(([k, v]) => {
+      const m = state.materiale.find(x => x.id === k);
+      if (m && m.nume.toLowerCase().includes('cablu')) cabluVal += v;
+    });
+    const eurPerMp = a.mp ? (d.valoareEur / a.mp).toFixed(2) : '—';
+    totalAps++;
+    if (a.mp) totalMp += a.mp;
+    totalEur += d.valoareEur;
+    totalTub += tubVal;
+    totalCablu += cabluVal;
+    totalOmZile += d.omZileTotal;
+    sumarRows += `<tr>
+      <td><b>${a.cod}</b></td>
+      <td>${a.tip}</td>
+      <td style="text-align:right">${a.mp || '—'}</td>
+      <td style="text-align:center;color:${stareCol[stare]};font-weight:600">${stareIcon[stare]} ${stareNume[stare]}</td>
+      <td style="text-align:right">${d.zileLucr.size}</td>
+      <td style="text-align:right">${d.omZileTotal}</td>
+      <td style="text-align:right;color:#1e40af;font-weight:600">${Math.round(tubVal)}</td>
+      <td style="text-align:right;color:#10b981;font-weight:600">${Math.round(cabluVal)}</td>
+      <td style="text-align:right;font-weight:700;color:#10b981">${d.valoareEur.toFixed(2)} €</td>
+      <td style="text-align:right">${eurPerMp}</td>
+    </tr>`;
+  });
+  const sumarTotalRow = `<tr style="background:#f3f4f6;font-weight:700;font-size:13px">
+    <td colspan="2">TOTAL (${totalAps} ap.)</td>
+    <td style="text-align:right">${totalMp || '—'}</td>
+    <td></td>
+    <td></td>
+    <td style="text-align:right">${totalOmZile}</td>
+    <td style="text-align:right;color:#1e40af">${Math.round(totalTub)}</td>
+    <td style="text-align:right;color:#10b981">${Math.round(totalCablu)}</td>
+    <td style="text-align:right;color:#10b981;font-size:14px">${totalEur.toFixed(2)} €</td>
+    <td style="text-align:right">${totalMp ? (totalEur / totalMp).toFixed(2) : '—'}</td>
+  </tr>`;
+
+  // === DETALIU PE FIECARE APARTAMENT (paginile 2+) ===
+  const detaliuPagini = datele.map((d, idx) => {
+    if (d.rapZi.length === 0) return ''; // skip dacă nu are activitate
+    const a = d.ap;
+    const stare = a.stare || 'neinceput';
+
+    // KPI compact
+    const tubPerMp = a.mp && d.totalMat.tub20 ? (d.totalMat.tub20 / a.mp).toFixed(2) : '—';
+    let totalCabluAp = 0;
+    Object.entries(d.totalMat).forEach(([k, v]) => {
+      const m = state.materiale.find(x => x.id === k);
+      if (m && m.nume.toLowerCase().includes('cablu')) totalCabluAp += v;
+    });
+    const cabluPerMp = a.mp && totalCabluAp ? (totalCabluAp / a.mp).toFixed(2) : '—';
+    const eurPerMp = a.mp ? (d.valoareEur / a.mp).toFixed(2) : '—';
+
+    // Materiale facturabile (sumar)
+    const matFact = [];
+    Object.entries(d.totalMat).forEach(([k, v]) => {
+      if (!esteMaterialFacturabil(k)) return;
+      const m = state.materiale.find(x => x.id === k);
+      if (!m) return;
+      matFact.push({ nume: m.nume, um: m.um, cant: v, pret: m.pretEur || 0, val: v * (m.pretEur || 0) });
+    });
+    matFact.sort((x, y) => {
+      const ordin = (n) => (n || '').toLowerCase().includes('tub') ? 0 : ((n || '').toLowerCase().includes('jgheab') ? 2 : 1);
+      return ordin(x.nume) - ordin(y.nume);
+    });
+    const matRows = matFact.map(l =>
+      `<tr><td>${l.nume.replace('Cablu CYYF ', '').replace(' mmp', '').replace('Tub PVC ', '')}</td><td style="text-align:center">${l.um}</td><td style="text-align:right;font-weight:700">${Math.round(l.cant)}</td><td style="text-align:right">${l.pret.toFixed(2)}</td><td style="text-align:right;color:#10b981;font-weight:700">${l.val.toFixed(2)}</td></tr>`
+    ).join('') || '<tr><td colspan="5" style="text-align:center;color:#9ca3af">Nicio cantitate facturabilă</td></tr>';
+
+    // Muncitori (din echipe)
+    const muncRows = Object.values(d.muncitoriZile).sort((x, y) => x.cod.localeCompare(y.cod)).map(m =>
+      `<tr><td style="text-align:center"><b>${m.cod}</b></td><td>${m.nume}</td><td style="text-align:right">${m.zileSet.size} zile</td><td style="text-align:right">${m.oreTotal.toFixed(1)}h</td></tr>`
+    ).join('') || '<tr><td colspan="4" style="text-align:center;color:#9ca3af;font-size:10px">Nicio echipă atribuită alocărilor</td></tr>';
+
+    return `
+<div class="page page-break">
+  <div class="header-sm">
+    <img src="logo.png" class="logo-sm" />
+    <div>
+      <div style="font-weight:700;color:#1e40af">${state.firmaNume || 'iFort Systems SRL'}</div>
+      <div style="font-size:10px;color:#6b7280">Raport apartament — ${state.santier || 'Corallis'}</div>
+    </div>
+    <div style="margin-left:auto;text-align:right">
+      <div style="font-size:11px;color:#9ca3af">Pagina ${idx + 2} / ${datele.length + 1}</div>
+    </div>
+  </div>
+
+  <h2 style="background:${stareCol[stare]};color:white;padding:6px 12px;border-radius:6px;margin:8px 0 6px;font-size:14px">${stareIcon[stare]} ${a.cod} — ${a.tip} — ${a.mp ? a.mp + ' mp' : 'fără mp'} — ${stareNume[stare]}</h2>
+
+  <div class="info-grid-sm">
+    <div><b>Prima zi:</b> ${fmtDate(d.dataStart)}</div>
+    <div><b>Ultima zi:</b> ${fmtDate(d.dataEnd)}</div>
+    <div><b>Durata calendar:</b> ${d.durataCalendar} zile</div>
+    <div><b>Zile lucrate:</b> ${d.zileLucr.size}</div>
+    <div><b>Om-zile total:</b> ${d.omZileTotal}</div>
+    <div><b>Echipa dominantă:</b> ${d.echipaDom ? `<span style="background:${d.echipaDom.culoare};color:white;padding:1px 6px;border-radius:6px;font-size:10px">${d.echipaDom.nume}</span>` : '—'}</div>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi-card-sm"><div class="val" style="color:#10b981">${d.valoareEur.toFixed(2)} €</div><div class="lbl">Valoare facturabilă</div></div>
+    <div class="kpi-card-sm"><div class="val">${Math.round(d.totalMetri)} m</div><div class="lbl">Metri facturabili</div></div>
+    <div class="kpi-card-sm"><div class="val" style="color:#f59e0b">${tubPerMp}</div><div class="lbl">Tub / mp</div></div>
+    <div class="kpi-card-sm"><div class="val" style="color:#8b5cf6">${cabluPerMp}</div><div class="lbl">Cablu / mp</div></div>
+    <div class="kpi-card-sm"><div class="val" style="color:#06b6d4">${eurPerMp}</div><div class="lbl">EUR / mp</div></div>
+  </div>
+
+  <h3>💰 Materiale facturabile</h3>
+  <table class="tbl-sm"><thead><tr><th>Denumire</th><th style="width:40px;text-align:center">UM</th><th style="width:70px;text-align:right">Cant.</th><th style="width:70px;text-align:right">Preț€</th><th style="width:80px;text-align:right">Total€</th></tr></thead>
+    <tbody>${matRows}<tr style="background:#f3f4f6;font-weight:700"><td colspan="4" style="text-align:right">TOTAL FACTURABIL</td><td style="text-align:right;color:#10b981">${d.valoareEur.toFixed(2)} €</td></tr></tbody>
+  </table>
+
+  <h3>👷 Muncitori implicați</h3>
+  <table class="tbl-sm"><thead><tr><th style="width:50px;text-align:center">Cod</th><th>Nume</th><th style="width:70px;text-align:right">Zile</th><th style="width:80px;text-align:right">Ore</th></tr></thead>
+    <tbody>${muncRows}</tbody>
+  </table>
+</div>`;
+  }).join('');
+
+  const antetFirma = `
+    <div style="font-size:11px;line-height:1.5;color:#374151">
+      <div style="font-weight:700;font-size:13px;color:#1e40af">${state.firmaNume || 'iFort Systems SRL'}</div>
+      <div>${state.firmaAdresa || ''}</div>
+      <div><b>CUI:</b> ${state.firmaCUI || ''} &nbsp; <b>ONRC:</b> ${state.firmaONRC || ''}</div>
+      <div><b>IBAN:</b> <span style="color:#374151">${state.firmaIBAN || ''}</span></div>
+    </div>`;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="format-detection" content="telephone=no, date=no, address=no, email=no"><title>Raport consolidat apartamente</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
+a,a:link,a:visited{color:inherit !important;text-decoration:none !important;cursor:default}
+.page{background:white;padding:20px;max-width:1000px;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1)}
+.header{display:flex;align-items:flex-start;gap:18px;border-bottom:3px solid #10b981;padding-bottom:10px;margin-bottom:12px}
+.header .logo{width:65px}
+.header-sm{display:flex;align-items:center;gap:10px;border-bottom:2px solid #1e40af;padding-bottom:6px;margin-bottom:8px}
+.logo-sm{width:35px}
+.intern-badge{background:#d1fae5;color:#065f46;padding:5px 12px;border-radius:6px;font-weight:600;font-size:11px;text-align:center;margin-bottom:8px;display:inline-block}
+.title{font-size:18px;font-weight:700;text-align:center;margin:6px 0;color:#10b981}
+.subtitle{font-size:11px;color:#6b7280;text-align:center;margin-bottom:12px}
+.info-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 18px;background:#f0fdf4;padding:12px;border-radius:8px;margin-bottom:12px;font-size:12px;border-left:4px solid #10b981}
+.info-grid b{color:#065f46}
+.info-grid-sm{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 12px;background:#f9fafb;padding:8px;border-radius:6px;margin-bottom:8px;font-size:11px;border-left:3px solid #1e40af}
+h2{font-size:14px;color:#10b981;margin-top:14px;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:3px}
+h3{font-size:11px;color:#1e40af;margin-top:8px;margin-bottom:4px;border-bottom:1px solid #f3f4f6;padding-bottom:2px}
+table{width:100%;border-collapse:collapse;margin:6px 0}
+th,td{padding:5px 7px;border:1px solid #e5e7eb;font-size:11px}
+th{background:#1e40af;color:white;text-align:left;font-weight:600}
+.tbl-sm th,.tbl-sm td{padding:3px 6px;font-size:10px}
+.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:8px}
+.kpi-card-sm{background:#f9fafb;padding:6px;border-radius:5px;border-left:3px solid #1e40af;text-align:center}
+.kpi-card-sm .val{font-size:14px;font-weight:700;color:#1e40af}
+.kpi-card-sm .lbl{font-size:9px;color:#6b7280;margin-top:2px}
+.footer{margin-top:18px;padding-top:8px;border-top:1px solid #e5e7eb;font-size:10px;color:#9ca3af;text-align:center}
+.no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#10b981;color:white;border:none;border-radius:6px;cursor:pointer;z-index:100}
+.page-break{page-break-before:always}
+@media print{@page{size:A4 portrait;margin:8mm}body{background:white}.page{margin:0;padding:5mm;box-shadow:none;max-width:none}.no-print{display:none}tr{page-break-inside:avoid}thead{display:table-header-group}}
+</style></head><body>
+<button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
+
+<!-- PAGINA 1: SUMAR -->
+<div class="page">
+  <div class="intern-badge">🏠 RAPORT CONSOLIDAT APARTAMENTE — Document intern</div>
+  <div class="header"><img src="logo.png" class="logo" />${antetFirma}</div>
+
+  <div class="title">SITUAȚIE APARTAMENTE</div>
+  <div class="subtitle">${filtruText} • Generat ${fmtDate(todayISO())}</div>
+
+  <div class="info-grid">
+    <div><b>Apartamente:</b> ${totalAps}</div>
+    <div><b>Suprafață totală:</b> ${totalMp ? totalMp + ' mp' : '—'}</div>
+    <div><b>Valoare totală:</b> ${totalEur.toFixed(2)} €</div>
+    <div><b>Tub total:</b> ${Math.round(totalTub)} m</div>
+    <div><b>Cabluri total:</b> ${Math.round(totalCablu)} m</div>
+    <div><b>Șantier:</b> ${state.santier || 'Corallis'}</div>
+  </div>
+
+  <h2>📋 Tabel sumar</h2>
+  <table>
+    <thead><tr>
+      <th>Cod</th><th>Tip</th><th style="text-align:right">mp</th><th style="text-align:center">Stare</th>
+      <th style="text-align:right">Zile</th><th style="text-align:right">Om-zile</th>
+      <th style="text-align:right">Tub (m)</th><th style="text-align:right">Cabluri (m)</th>
+      <th style="text-align:right">Valoare €</th><th style="text-align:right">€/mp</th>
+    </tr></thead>
+    <tbody>${sumarRows}${sumarTotalRow}</tbody>
+  </table>
+
+  <div class="footer">Document intern — ${state.firmaNume || 'iFort Systems SRL'} — ${fmtDate(todayISO())} — Pagina 1 / ${datele.length + 1}</div>
+</div>
+
+<!-- PAGINI 2+: DETALIU PER APARTAMENT -->
+${detaliuPagini}
+
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html); w.document.close();
+}
+
+function genereazaRaportConsolidatExcel() {
+  const aps = filtreazaApartamenteRap();
+  if (aps.length === 0) { toast('Niciun apartament cu filtrele alese'); return; }
+
+  const stareNume = { neinceput: 'Neinceput', in_lucru: 'In lucru', gata: 'Gata', blocat: 'Blocat' };
+  const datele = aps.map(a => colecteazaApartament(a.cod));
+
+  let csv = '﻿';
+  csv += `Raport consolidat apartamente — ${state.santier || 'Corallis'}\n`;
+  csv += `Executant:,"${state.firmaNume || 'iFort Systems SRL'}"\n`;
+  csv += `Beneficiar:,"${state.beneficiar || 'Kesz Electric SRL'}"\n`;
+  csv += `Generat:,${fmtDate(todayISO())}\n`;
+  csv += `Apartamente incluse:,${aps.length}\n\n`;
+
+  csv += `TABEL SUMAR\n`;
+  csv += `Cod,Tip,mp,Stare,Zile lucr.,Om-zile,Tub (m),Cabluri (m),Valoare EUR,EUR/mp\n`;
+  let totalEur = 0, totalMp = 0, totalTub = 0, totalCablu = 0, totalOmZ = 0;
+  datele.forEach(d => {
+    const a = d.ap;
+    const tub = d.totalMat.tub20 || 0;
+    let cablu = 0;
+    Object.entries(d.totalMat).forEach(([k, v]) => {
+      const m = state.materiale.find(x => x.id === k);
+      if (m && m.nume.toLowerCase().includes('cablu')) cablu += v;
+    });
+    const eurMp = a.mp ? (d.valoareEur / a.mp).toFixed(2) : '';
+    csv += `${a.cod},"${a.tip}",${a.mp || ''},${stareNume[a.stare || 'neinceput']},${d.zileLucr.size},${d.omZileTotal},${Math.round(tub)},${Math.round(cablu)},${d.valoareEur.toFixed(2)},${eurMp}\n`;
+    totalEur += d.valoareEur;
+    if (a.mp) totalMp += a.mp;
+    totalTub += tub;
+    totalCablu += cablu;
+    totalOmZ += d.omZileTotal;
+  });
+  csv += `TOTAL,,${totalMp},,,${totalOmZ},${Math.round(totalTub)},${Math.round(totalCablu)},${totalEur.toFixed(2)},${totalMp ? (totalEur / totalMp).toFixed(2) : ''}\n\n`;
+
+  csv += `DETALIU MATERIALE PER APARTAMENT\n`;
+  datele.forEach(d => {
+    if (d.rapZi.length === 0) return;
+    const a = d.ap;
+    csv += `\n${a.cod} (${a.tip}, ${a.mp || '?'}mp, ${stareNume[a.stare || 'neinceput']})\n`;
+    csv += `Material,UM,Cantitate,Pret unit (EUR),Total (EUR)\n`;
+    const matSorted = Object.entries(d.totalMat).map(([k, v]) => {
+      const m = state.materiale.find(x => x.id === k);
+      return m ? { id: k, nume: m.nume, um: m.um, cant: v, pret: m.pretEur || 0, val: v * (m.pretEur || 0), fact: esteMaterialFacturabil(k) } : null;
+    }).filter(Boolean).sort((a, b) => (b.fact ? 1 : 0) - (a.fact ? 1 : 0) || a.nume.localeCompare(b.nume));
+    matSorted.forEach(l => csv += `"${l.nume}",${l.um},${Math.round(l.cant)},${l.fact ? l.pret.toFixed(2) : ''},${l.fact ? l.val.toFixed(2) : ''}\n`);
+    csv += `TOTAL FACTURABIL,,,,${d.valoareEur.toFixed(2)}\n`;
+  });
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `raport-consolidat-apartamente-${todayISO()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Excel descărcat ✓');
+}
+
+// Wire UI
+document.addEventListener('DOMContentLoaded', () => {
+  const sel1 = document.getElementById('filtruRapStare');
+  const sel2 = document.getElementById('filtruRapTip');
+  if (sel1) sel1.addEventListener('change', updateFiltruRapInfo);
+  if (sel2) sel2.addEventListener('change', updateFiltruRapInfo);
+  const btnPDF = document.getElementById('btnRapApartConsolidatPDF');
+  const btnXls = document.getElementById('btnRapApartConsolidatExcel');
+  if (btnPDF) btnPDF.addEventListener('click', genereazaRaportConsolidatPDF);
+  if (btnXls) btnXls.addEventListener('click', genereazaRaportConsolidatExcel);
+  setTimeout(updateFiltruRapInfo, 500);
+});
+
 function init() {
   load();
   document.getElementById('data').value = todayISO();
