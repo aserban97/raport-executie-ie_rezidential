@@ -142,6 +142,7 @@ document.querySelectorAll('.tab').forEach(btn => {
     if (btn.dataset.tab === 'personal') renderPersonal();
     if (btn.dataset.tab === 'situatii') renderSituatii();
     if (btn.dataset.tab === 'analiza') renderAnaliza();
+    if (btn.dataset.tab === 'finante') renderFinante();
     if (btn.dataset.tab === 'kpi') renderKPI();
     if (btn.dataset.tab === 'setari') renderSetari();
   });
@@ -4954,6 +4955,439 @@ document.addEventListener('DOMContentLoaded', () => {
   if (bSync) bSync.addEventListener('click', () => OneDrive.syncNow());
   if (bPull) bPull.addEventListener('click', () => OneDrive.forcePullFromCloud());
 });
+
+// ============= FINANȚE — Producție valoare facturabilă =============
+function esteMaterialFacturabil(matId) {
+  const m = state.materiale.find(x => x.id === matId);
+  if (!m) return false;
+  const nume = (m.nume || '').toLowerCase();
+  if (nume.includes('tub pvc')) return true;
+  if (nume.includes('cablu')) return true;
+  if (nume.includes('jgheab')) return true;
+  return false;
+}
+
+let finPerioada = { start: null, end: null, tip: 'saptamana-curenta' };
+
+function luniSaptamana(date) {
+  const d = new Date(date);
+  const zi = d.getDay() === 0 ? 6 : d.getDay() - 1;
+  d.setDate(d.getDate() - zi);
+  return d.toISOString().slice(0, 10);
+}
+function duminicaSaptamana(date) {
+  const luni = new Date(luniSaptamana(date));
+  luni.setDate(luni.getDate() + 6);
+  return luni.toISOString().slice(0, 10);
+}
+
+function setFinPerioada(tip) {
+  finPerioada.tip = tip;
+  const azi = todayISO();
+  if (tip === 'saptamana-curenta') {
+    finPerioada.start = luniSaptamana(azi);
+    finPerioada.end = duminicaSaptamana(azi);
+  } else if (tip === 'saptamana-prec') {
+    const luni = new Date(finPerioada.start || luniSaptamana(azi));
+    luni.setDate(luni.getDate() - 7);
+    finPerioada.start = luni.toISOString().slice(0, 10);
+    const dum = new Date(luni); dum.setDate(luni.getDate() + 6);
+    finPerioada.end = dum.toISOString().slice(0, 10);
+  } else if (tip === 'saptamana-urm') {
+    const luni = new Date(finPerioada.start || luniSaptamana(azi));
+    luni.setDate(luni.getDate() + 7);
+    finPerioada.start = luni.toISOString().slice(0, 10);
+    const dum = new Date(luni); dum.setDate(luni.getDate() + 6);
+    finPerioada.end = dum.toISOString().slice(0, 10);
+  }
+  const sInp = document.getElementById('finStart');
+  const eInp = document.getElementById('finEnd');
+  if (sInp) sInp.value = finPerioada.start;
+  if (eInp) eInp.value = finPerioada.end;
+}
+
+function calculeazaFinanteInterval(startISO, endISO) {
+  const perZi = {};
+  const totalMat = {};
+  let totalEur = 0;
+  let totalElZile = 0;
+  let totalMetri = 0;
+  state.rapoarte.forEach(r => {
+    if (r.data < startISO || r.data > endISO) return;
+    if (!perZi[r.data]) perZi[r.data] = { electricieni: 0, materiale: {}, valoareEur: 0, metri: 0 };
+    perZi[r.data].electricieni += r.nrElectricieni || 0;
+    totalElZile += r.nrElectricieni || 0;
+    Object.entries(r.materiale || {}).forEach(([k, v]) => {
+      if (!esteMaterialFacturabil(k)) return;
+      perZi[r.data].materiale[k] = (perZi[r.data].materiale[k] || 0) + v;
+      totalMat[k] = (totalMat[k] || 0) + v;
+      const m = state.materiale.find(x => x.id === k);
+      const pret = (m?.pretEur || 0);
+      const valoare = v * pret;
+      perZi[r.data].valoareEur += valoare;
+      perZi[r.data].metri += v;
+      totalEur += valoare;
+      totalMetri += v;
+    });
+  });
+  return { perZi, totalMat, totalEur, totalElZile, totalMetri };
+}
+
+function renderFinante() {
+  if (!finPerioada.start) setFinPerioada('saptamana-curenta');
+  const sInp = document.getElementById('finStart');
+  const eInp = document.getElementById('finEnd');
+  if (sInp && !sInp.value) sInp.value = finPerioada.start;
+  if (eInp && !eInp.value) eInp.value = finPerioada.end;
+  const lunaInp = document.getElementById('finLuna');
+  if (lunaInp && !lunaInp.value) {
+    const d = new Date(todayISO());
+    lunaInp.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+  if (sInp?.value) finPerioada.start = sInp.value;
+  if (eInp?.value) finPerioada.end = eInp.value;
+  document.getElementById('finInfoPerioada').textContent =
+    `Perioadă: ${fmtDate(finPerioada.start)} → ${fmtDate(finPerioada.end)}`;
+  renderFinCifre();
+  renderFinTabelZilnic();
+  renderFinSumarSaptamani();
+}
+
+function renderFinCifre() {
+  const cont = document.getElementById('finCifre');
+  const d = calculeazaFinanteInterval(finPerioada.start, finPerioada.end);
+  const days = Math.round((new Date(finPerioada.end) - new Date(finPerioada.start)) / 86400000) + 1;
+  const prevEnd = new Date(finPerioada.start); prevEnd.setDate(prevEnd.getDate() - 1);
+  const prevStart = new Date(prevEnd); prevStart.setDate(prevEnd.getDate() - (days - 1));
+  const prev = calculeazaFinanteInterval(prevStart.toISOString().slice(0,10), prevEnd.toISOString().slice(0,10));
+  function trend(curr, prev) {
+    if (!prev || prev === 0) return '';
+    const d = ((curr - prev) / prev * 100);
+    if (Math.abs(d) < 5) return ` <span style="color:#6b7280">→ ${d.toFixed(0)}%</span>`;
+    if (d > 0) return ` <span style="color:#10b981">↑ +${d.toFixed(0)}%</span>`;
+    return ` <span style="color:#dc2626">↓ ${d.toFixed(0)}%</span>`;
+  }
+  const eurPerEl = d.totalElZile ? d.totalEur / d.totalElZile : 0;
+  const nrZileCuActivitate = Object.keys(d.perZi).length;
+  const eurPerZi = nrZileCuActivitate ? d.totalEur / nrZileCuActivitate : 0;
+  let totalEurIst = 0, totalElIst = 0;
+  state.rapoarte.forEach(r => {
+    totalElIst += r.nrElectricieni || 0;
+    Object.entries(r.materiale || {}).forEach(([k, v]) => {
+      if (!esteMaterialFacturabil(k)) return;
+      const m = state.materiale.find(x => x.id === k);
+      totalEurIst += v * (m?.pretEur || 0);
+    });
+  });
+  const mediaIstorica = totalElIst ? totalEurIst / totalElIst : 0;
+  const scorPct = mediaIstorica ? Math.round((eurPerEl / mediaIstorica) * 100) : 0;
+  let scorEmoji = '🟡', scorCol = '#f59e0b';
+  if (scorPct >= 115) { scorEmoji = '🟢'; scorCol = '#10b981'; }
+  else if (scorPct < 85) { scorEmoji = '🔴'; scorCol = '#dc2626'; }
+  cont.innerHTML = `
+    <div class="prod-card" style="border-left-color:#10b981">
+      <div class="nume">💰 TOTAL facturat</div>
+      <div><span class="val-mare" style="color:#10b981">${d.totalEur.toFixed(2)}</span><span class="um">EUR</span></div>
+      <div class="recent"><span>Anterior: ${prev.totalEur.toFixed(0)}€</span>${trend(d.totalEur, prev.totalEur)}</div>
+    </div>
+    <div class="prod-card" style="border-left-color:#1e40af">
+      <div class="nume">📏 Metri totali</div>
+      <div><span class="val-mare">${Math.round(d.totalMetri)}</span><span class="um">m</span></div>
+      <div class="recent"><span>~${eurPerZi.toFixed(0)} €/zi cu activitate</span></div>
+    </div>
+    <div class="prod-card" style="border-left-color:#f59e0b">
+      <div class="nume">👷 Electricieni-zile</div>
+      <div><span class="val-mare" style="color:#f59e0b">${d.totalElZile}</span><span class="um">om-zi</span></div>
+      <div class="recent"><span>${nrZileCuActivitate} zile cu activitate</span></div>
+    </div>
+    <div class="prod-card" style="border-left-color:#8b5cf6">
+      <div class="nume">⚡ EUR / electrician-zi</div>
+      <div><span class="val-mare" style="color:#8b5cf6">${eurPerEl.toFixed(2)}</span><span class="um">EUR/el</span></div>
+      <div class="recent"><span>Anterior: ${(prev.totalElZile ? prev.totalEur/prev.totalElZile : 0).toFixed(2)}€</span>${trend(eurPerEl, prev.totalElZile ? prev.totalEur/prev.totalElZile : 0)}</div>
+    </div>
+    <div class="prod-card" style="border-left-color:${scorCol}">
+      <div class="nume">${scorEmoji} Scor perioadă</div>
+      <div><span class="val-mare" style="color:${scorCol}">${scorPct}%</span><span class="um">din medie</span></div>
+      <div class="recent"><span>Media istorică: ${mediaIstorica.toFixed(2)}€/el-zi</span></div>
+    </div>
+  `;
+}
+
+function renderFinTabelZilnic() {
+  const cont = document.getElementById('finTabelZilnic');
+  const d = calculeazaFinanteInterval(finPerioada.start, finPerioada.end);
+  const zile = Object.keys(d.perZi).sort();
+  if (zile.length === 0) {
+    cont.innerHTML = '<div class="empty">Nicio zi cu producție facturabilă în această perioadă</div>';
+    return;
+  }
+  const matUtilizate = Object.keys(d.totalMat).filter(id => d.totalMat[id] > 0);
+  matUtilizate.sort((a, b) => {
+    const ma = state.materiale.find(x => x.id === a);
+    const mb = state.materiale.find(x => x.id === b);
+    const ordin = (n) => (n || '').toLowerCase().includes('tub') ? 0 : ((n || '').toLowerCase().includes('jgheab') ? 2 : 1);
+    return ordin(ma?.nume) - ordin(mb?.nume) || (ma?.nume || '').localeCompare(mb?.nume || '');
+  });
+  const eurPerElMedie = d.totalElZile ? d.totalEur / d.totalElZile : 0;
+  function denShort(mat) {
+    if (!mat) return '?';
+    return mat.nume.replace('Cablu CYYF ', '').replace(' mmp', '').replace('Tub PVC ', '').replace('Jgheab ', 'Jgh.');
+  }
+  const NUME_ZI = ['Du', 'Lu', 'Ma', 'Mi', 'Jo', 'Vi', 'Sâ'];
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>';
+  html += '<th style="text-align:left;padding:6px;background:#1e40af;color:white">Zi</th>';
+  html += '<th style="text-align:center;padding:6px;background:#1e40af;color:white">El.</th>';
+  matUtilizate.forEach(id => {
+    const m = state.materiale.find(x => x.id === id);
+    html += `<th style="text-align:right;padding:6px;background:#1e40af;color:white">${denShort(m)} (${m?.um || ''})</th>`;
+  });
+  html += '<th style="text-align:right;padding:6px;background:#1e40af;color:white">TOTAL m</th>';
+  html += '<th style="text-align:right;padding:6px;background:#1e40af;color:white">TOTAL €</th>';
+  html += '<th style="text-align:right;padding:6px;background:#1e40af;color:white">€/el</th>';
+  html += '<th style="text-align:center;padding:6px;background:#1e40af;color:white">Scor</th>';
+  html += '</tr></thead><tbody>';
+  zile.forEach(data => {
+    const zi = d.perZi[data];
+    const eurPerEl = zi.electricieni ? zi.valoareEur / zi.electricieni : 0;
+    let scorEmoji = '🟡';
+    if (eurPerElMedie > 0) {
+      if (eurPerEl >= eurPerElMedie * 1.15) scorEmoji = '🟢';
+      else if (eurPerEl < eurPerElMedie * 0.85) scorEmoji = '🔴';
+    }
+    const dt = new Date(data);
+    const numeZi = NUME_ZI[dt.getDay()];
+    html += `<tr style="border-bottom:1px solid #f3f4f6">
+      <td style="padding:5px;font-weight:600">${numeZi} ${data.slice(8)}.${data.slice(5,7)}</td>
+      <td style="padding:5px;text-align:center">${zi.electricieni}</td>`;
+    matUtilizate.forEach(id => {
+      const v = zi.materiale[id] || 0;
+      html += `<td style="padding:5px;text-align:right;${v > 0 ? 'color:#1e40af;font-weight:600' : 'color:#d1d5db'}">${v > 0 ? Math.round(v) : '—'}</td>`;
+    });
+    html += `<td style="padding:5px;text-align:right;font-weight:700">${Math.round(zi.metri)}</td>`;
+    html += `<td style="padding:5px;text-align:right;font-weight:700;color:#10b981">${zi.valoareEur.toFixed(2)}</td>`;
+    html += `<td style="padding:5px;text-align:right">${eurPerEl.toFixed(2)}</td>`;
+    html += `<td style="padding:5px;text-align:center;font-size:14px">${scorEmoji}</td>`;
+    html += '</tr>';
+  });
+  html += '<tr style="background:#f3f4f6;font-weight:700">';
+  html += '<td style="padding:6px">TOTAL</td>';
+  html += `<td style="padding:6px;text-align:center">${d.totalElZile}</td>`;
+  matUtilizate.forEach(id => {
+    html += `<td style="padding:6px;text-align:right;color:#1e40af">${Math.round(d.totalMat[id])}</td>`;
+  });
+  html += `<td style="padding:6px;text-align:right">${Math.round(d.totalMetri)}</td>`;
+  html += `<td style="padding:6px;text-align:right;color:#10b981;font-size:13px">${d.totalEur.toFixed(2)} €</td>`;
+  html += `<td style="padding:6px;text-align:right">${eurPerElMedie.toFixed(2)}</td>`;
+  html += '<td></td></tr></tbody></table>';
+  cont.innerHTML = html;
+}
+
+function renderFinSumarSaptamani() {
+  const cont = document.getElementById('finSumarSaptamani');
+  const lunaInp = document.getElementById('finLuna');
+  if (!lunaInp?.value) { cont.innerHTML = '<div class="empty">Alege o lună mai sus</div>'; return; }
+  const [an, lunaNr] = lunaInp.value.split('-').map(Number);
+  const primaZi = new Date(an, lunaNr - 1, 1);
+  const ultimaZi = new Date(an, lunaNr, 0);
+  const saptamani = [];
+  let cursor = new Date(luniSaptamana(primaZi.toISOString().slice(0,10)));
+  while (cursor <= ultimaZi) {
+    const luni = cursor.toISOString().slice(0, 10);
+    const dum = new Date(cursor); dum.setDate(cursor.getDate() + 6);
+    saptamani.push({ luni, dum: dum.toISOString().slice(0, 10) });
+    cursor.setDate(cursor.getDate() + 7);
+  }
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
+  html += '<th style="text-align:left;padding:6px;background:#1e40af;color:white">Săptămâna</th>';
+  html += '<th style="text-align:center;padding:6px;background:#1e40af;color:white">Zile</th>';
+  html += '<th style="text-align:right;padding:6px;background:#1e40af;color:white">El.-zile</th>';
+  html += '<th style="text-align:right;padding:6px;background:#1e40af;color:white">Metri</th>';
+  html += '<th style="text-align:right;padding:6px;background:#1e40af;color:white">TOTAL €</th>';
+  html += '<th style="text-align:right;padding:6px;background:#1e40af;color:white">€/el</th>';
+  html += '<th style="text-align:center;padding:6px;background:#1e40af;color:white">Sel.</th>';
+  html += '</tr></thead><tbody>';
+  let totalLunaEur = 0, totalLunaEl = 0, totalLunaMetri = 0;
+  saptamani.forEach(s => {
+    const d = calculeazaFinanteInterval(s.luni, s.dum);
+    const nrZileCuAct = Object.keys(d.perZi).length;
+    const eurPerEl = d.totalElZile ? d.totalEur / d.totalElZile : 0;
+    totalLunaEur += d.totalEur;
+    totalLunaEl += d.totalElZile;
+    totalLunaMetri += d.totalMetri;
+    html += `<tr style="border-bottom:1px solid #f3f4f6">
+      <td style="padding:5px;font-weight:600">${fmtDate(s.luni)} → ${fmtDate(s.dum)}</td>
+      <td style="padding:5px;text-align:center">${nrZileCuAct}</td>
+      <td style="padding:5px;text-align:right">${d.totalElZile}</td>
+      <td style="padding:5px;text-align:right">${Math.round(d.totalMetri)}</td>
+      <td style="padding:5px;text-align:right;font-weight:700;color:#10b981">${d.totalEur.toFixed(2)} €</td>
+      <td style="padding:5px;text-align:right">${eurPerEl.toFixed(2)}</td>
+      <td style="padding:5px;text-align:center"><button type="button" class="btn-secondary btn-sel-sapt" data-luni="${s.luni}" data-dum="${s.dum}" style="font-size:10px;padding:3px 8px">vezi</button></td>
+    </tr>`;
+  });
+  html += `<tr style="background:#f3f4f6;font-weight:700">
+    <td style="padding:6px">TOTAL LUNĂ</td>
+    <td></td>
+    <td style="padding:6px;text-align:right">${totalLunaEl}</td>
+    <td style="padding:6px;text-align:right">${Math.round(totalLunaMetri)}</td>
+    <td style="padding:6px;text-align:right;color:#10b981;font-size:14px">${totalLunaEur.toFixed(2)} €</td>
+    <td style="padding:6px;text-align:right">${totalLunaEl ? (totalLunaEur/totalLunaEl).toFixed(2) : '0.00'}</td>
+    <td></td>
+  </tr></tbody></table>`;
+  cont.innerHTML = html;
+  cont.querySelectorAll('.btn-sel-sapt').forEach(b => b.addEventListener('click', () => {
+    finPerioada.start = b.dataset.luni;
+    finPerioada.end = b.dataset.dum;
+    document.getElementById('finStart').value = b.dataset.luni;
+    document.getElementById('finEnd').value = b.dataset.dum;
+    renderFinante();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }));
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('[data-fin-perioada]').forEach(btn => {
+    btn.addEventListener('click', () => { setFinPerioada(btn.dataset.finPerioada); renderFinante(); });
+  });
+  const sInp = document.getElementById('finStart');
+  const eInp = document.getElementById('finEnd');
+  if (sInp) sInp.addEventListener('change', () => { finPerioada.start = sInp.value; renderFinante(); });
+  if (eInp) eInp.addEventListener('change', () => { finPerioada.end = eInp.value; renderFinante(); });
+  const lunaInp = document.getElementById('finLuna');
+  if (lunaInp) lunaInp.addEventListener('change', renderFinSumarSaptamani);
+  const btnPDF = document.getElementById('btnFinantePDF');
+  const btnExcel = document.getElementById('btnFinanteExcel');
+  if (btnPDF) btnPDF.addEventListener('click', genereazaFinantePDF);
+  if (btnExcel) btnExcel.addEventListener('click', genereazaFinanteExcel);
+});
+
+function genereazaFinantePDF() {
+  const d = calculeazaFinanteInterval(finPerioada.start, finPerioada.end);
+  if (Object.keys(d.perZi).length === 0) { toast('Nicio activitate facturabilă în perioadă'); return; }
+  const matUtilizate = Object.keys(d.totalMat).filter(id => d.totalMat[id] > 0);
+  matUtilizate.sort((a, b) => {
+    const ma = state.materiale.find(x => x.id === a);
+    const mb = state.materiale.find(x => x.id === b);
+    const ordin = (n) => (n || '').toLowerCase().includes('tub') ? 0 : ((n || '').toLowerCase().includes('jgheab') ? 2 : 1);
+    return ordin(ma?.nume) - ordin(mb?.nume) || (ma?.nume || '').localeCompare(mb?.nume || '');
+  });
+  function denShort(mat) {
+    if (!mat) return '?';
+    return mat.nume.replace('Cablu CYYF ', '').replace(' mmp', '').replace('Tub PVC ', '').replace('Jgheab ', 'Jgh.');
+  }
+  const NUME_ZI = ['Du', 'Lu', 'Ma', 'Mi', 'Jo', 'Vi', 'Sâ'];
+  const zile = Object.keys(d.perZi).sort();
+  const eurPerElMedie = d.totalElZile ? d.totalEur / d.totalElZile : 0;
+  let headerCols = '<th>Zi</th><th style="text-align:center">El.</th>';
+  matUtilizate.forEach(id => {
+    const m = state.materiale.find(x => x.id === id);
+    headerCols += `<th style="text-align:right">${denShort(m)}</th>`;
+  });
+  headerCols += '<th style="text-align:right">m total</th><th style="text-align:right">EUR</th><th style="text-align:right">EUR/el</th>';
+  let bodyRows = '';
+  zile.forEach(data => {
+    const zi = d.perZi[data];
+    const eurPerEl = zi.electricieni ? zi.valoareEur / zi.electricieni : 0;
+    const dt = new Date(data);
+    const numeZi = NUME_ZI[dt.getDay()];
+    bodyRows += `<tr><td><b>${numeZi}</b> ${fmtDate(data)}</td><td style="text-align:center">${zi.electricieni}</td>`;
+    matUtilizate.forEach(id => {
+      const v = zi.materiale[id] || 0;
+      bodyRows += `<td style="text-align:right">${v > 0 ? Math.round(v) : '—'}</td>`;
+    });
+    bodyRows += `<td style="text-align:right;font-weight:700">${Math.round(zi.metri)}</td>`;
+    bodyRows += `<td style="text-align:right;color:#10b981;font-weight:700">${zi.valoareEur.toFixed(2)}</td>`;
+    bodyRows += `<td style="text-align:right">${eurPerEl.toFixed(2)}</td></tr>`;
+  });
+  bodyRows += `<tr style="background:#f3f4f6;font-weight:700"><td>TOTAL</td><td style="text-align:center">${d.totalElZile}</td>`;
+  matUtilizate.forEach(id => { bodyRows += `<td style="text-align:right">${Math.round(d.totalMat[id])}</td>`; });
+  bodyRows += `<td style="text-align:right">${Math.round(d.totalMetri)}</td><td style="text-align:right;color:#10b981">${d.totalEur.toFixed(2)}</td><td style="text-align:right">${eurPerElMedie.toFixed(2)}</td></tr>`;
+  const antet = `<div style="font-size:11px;line-height:1.5;color:#374151;margin-bottom:10px">
+      <div style="font-weight:700;font-size:13px;color:#1e40af">${state.firmaNume || 'iFort Systems SRL'}</div>
+      <div>${state.firmaAdresa || ''}</div>
+      <div><b>CUI:</b> ${state.firmaCUI || ''} &nbsp; <b>ONRC:</b> ${state.firmaONRC || ''}</div>
+      <div><b>IBAN:</b> <span style="color:#374151">${state.firmaIBAN || ''}</span></div>
+    </div>`;
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="format-detection" content="telephone=no, date=no, address=no, email=no"><title>Finanțe ${fmtDate(finPerioada.start)} - ${fmtDate(finPerioada.end)}</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
+a,a:link,a:visited{color:inherit !important;text-decoration:none !important;cursor:default}
+.page{background:white;padding:25px;max-width:1100px;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1)}
+.header{display:flex;align-items:flex-start;gap:18px;border-bottom:3px solid #10b981;padding-bottom:10px;margin-bottom:14px}
+.header .logo{width:65px}
+.intern-badge{background:#d1fae5;color:#065f46;padding:5px 12px;border-radius:6px;font-weight:600;font-size:11px;text-align:center;margin-bottom:10px;display:inline-block}
+.title{font-size:18px;font-weight:700;text-align:center;margin:6px 0;color:#10b981}
+.subtitle{font-size:12px;color:#6b7280;text-align:center;margin-bottom:14px}
+.info-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 18px;background:#f0fdf4;padding:12px;border-radius:8px;margin-bottom:14px;font-size:12px;border-left:4px solid #10b981}
+.info-grid b{color:#065f46}
+table{width:100%;border-collapse:collapse;margin:8px 0}
+th,td{padding:6px 8px;border:1px solid #d1d5db;font-size:11px}
+th{background:#1e40af;color:white;text-align:left;font-weight:600}
+.footer{margin-top:18px;padding-top:8px;border-top:1px solid #e5e7eb;font-size:10px;color:#9ca3af;text-align:center}
+.no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#10b981;color:white;border:none;border-radius:6px;cursor:pointer;z-index:100}
+@media print{@page{size:A4 landscape;margin:8mm}body{background:white}.page{margin:0;padding:5mm;box-shadow:none}.no-print{display:none}tr{page-break-inside:avoid}thead{display:table-header-group}}
+</style></head><body>
+<button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
+<div class="page">
+  <div class="intern-badge">💰 DOCUMENT INTERN — Producție valoare</div>
+  <div class="header"><img src="logo.png" class="logo" />${antet}</div>
+  <div class="title">RAPORT FINANCIAR / PRODUCȚIE</div>
+  <div class="subtitle">${fmtDate(finPerioada.start)} → ${fmtDate(finPerioada.end)} • Generat ${fmtDate(todayISO())}</div>
+  <div class="info-grid">
+    <div><b>Total facturat:</b> ${d.totalEur.toFixed(2)} EUR</div>
+    <div><b>Metri totali:</b> ${Math.round(d.totalMetri)}</div>
+    <div><b>Electricieni-zile:</b> ${d.totalElZile}</div>
+    <div><b>Zile activitate:</b> ${Object.keys(d.perZi).length}</div>
+    <div><b>EUR / electrician-zi:</b> ${eurPerElMedie.toFixed(2)}</div>
+    <div><b>Șantier:</b> ${state.santier || 'Corallis'}</div>
+  </div>
+  <table><thead><tr>${headerCols}</tr></thead><tbody>${bodyRows}</tbody></table>
+  <p style="font-size:10px;color:#6b7280;margin-top:8px"><b>Materiale facturabile:</b> tub, cabluri, jgheab. Auxiliarele NU se facturează separat.</p>
+  <div class="footer">Document intern — ${state.firmaNume || 'iFort Systems SRL'} — ${fmtDate(todayISO())}</div>
+</div></body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(html); w.document.close();
+}
+
+function genereazaFinanteExcel() {
+  const d = calculeazaFinanteInterval(finPerioada.start, finPerioada.end);
+  if (Object.keys(d.perZi).length === 0) { toast('Nicio activitate facturabilă'); return; }
+  const matUtilizate = Object.keys(d.totalMat).filter(id => d.totalMat[id] > 0);
+  matUtilizate.sort((a, b) => {
+    const ma = state.materiale.find(x => x.id === a);
+    const mb = state.materiale.find(x => x.id === b);
+    const ordin = (n) => (n || '').toLowerCase().includes('tub') ? 0 : ((n || '').toLowerCase().includes('jgheab') ? 2 : 1);
+    return ordin(ma?.nume) - ordin(mb?.nume) || (ma?.nume || '').localeCompare(mb?.nume || '');
+  });
+  let csv = '﻿';
+  csv += `Raport Finante / Productie\n`;
+  csv += `Executant:,"${state.firmaNume || 'iFort Systems SRL'}"\n`;
+  csv += `Perioada:,${fmtDate(finPerioada.start)} - ${fmtDate(finPerioada.end)}\n\n`;
+  csv += 'Data,Electricieni';
+  matUtilizate.forEach(id => {
+    const m = state.materiale.find(x => x.id === id);
+    csv += `,"${m?.nume || id} (${m?.um || ''})"`;
+  });
+  csv += ',Total metri,Total EUR,EUR/electrician\n';
+  const zile = Object.keys(d.perZi).sort();
+  zile.forEach(data => {
+    const zi = d.perZi[data];
+    const eurPerEl = zi.electricieni ? zi.valoareEur / zi.electricieni : 0;
+    csv += `${data},${zi.electricieni}`;
+    matUtilizate.forEach(id => csv += `,${Math.round(zi.materiale[id] || 0)}`);
+    csv += `,${Math.round(zi.metri)},${zi.valoareEur.toFixed(2)},${eurPerEl.toFixed(2)}\n`;
+  });
+  csv += `TOTAL,${d.totalElZile}`;
+  matUtilizate.forEach(id => csv += `,${Math.round(d.totalMat[id])}`);
+  const eurMed = d.totalElZile ? d.totalEur / d.totalElZile : 0;
+  csv += `,${Math.round(d.totalMetri)},${d.totalEur.toFixed(2)},${eurMed.toFixed(2)}\n`;
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `finante-${finPerioada.start}-${finPerioada.end}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Excel descărcat ✓');
+}
 
 function init() {
   load();

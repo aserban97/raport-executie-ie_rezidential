@@ -29,6 +29,7 @@
     <button class="tab" data-tab="personal">Personal</button>
     <button class="tab" data-tab="analiza">Analiză</button>
     <button class="tab" data-tab="kpi">KPI+</button>
+    <button class="tab" data-tab="finante">Finanțe</button>
     <button class="tab" data-tab="situatii">Situații</button>
     <button class="tab" data-tab="setari">Setări</button>
   </nav>
@@ -505,6 +506,56 @@
 
       <h3>Trend ultimele 7 zile</h3>
       <div id="kpiTrend" class="card"></div>
+    </section>
+
+    <!-- TAB: FINANȚE -->
+    <section id="tab-finante" class="tab-panel">
+      <h2>💰 Finanțe — producție valoare</h2>
+
+      <div class="card">
+        <h3>Selectare perioadă</h3>
+        <div class="actions" style="flex-wrap:wrap;margin-bottom:10px">
+          <button type="button" class="btn-secondary" data-fin-perioada="saptamana-curenta">📅 Săptămâna curentă</button>
+          <button type="button" class="btn-secondary" data-fin-perioada="saptamana-prec">⬅️ Săptămâna anterioară</button>
+          <button type="button" class="btn-secondary" data-fin-perioada="saptamana-urm">➡️ Săptămâna următoare</button>
+        </div>
+        <div class="row" style="align-items:flex-end">
+          <label>
+            Lună (vezi toate săptămânile lunii)
+            <input type="month" id="finLuna" />
+          </label>
+          <label>
+            Sau interval custom: de la
+            <input type="date" id="finStart" />
+          </label>
+          <label>
+            până la
+            <input type="date" id="finEnd" />
+          </label>
+        </div>
+        <p class="small" id="finInfoPerioada" style="margin-top:6px;color:#1e40af;font-weight:600"></p>
+      </div>
+
+      <div class="card">
+        <h3>💎 Cifre cheie perioadă</h3>
+        <div id="finCifre" class="kpi-grid"></div>
+      </div>
+
+      <div class="card">
+        <h3>📊 Producție zilnică (zile cu activitate)</h3>
+        <div id="finTabelZilnic" style="overflow-x:auto"></div>
+        <p class="small">🟢 Zi bună (peste medie +15%) • 🟡 Zi medie • 🔴 Zi slabă (sub medie -15%)</p>
+      </div>
+
+      <div class="card">
+        <h3>📈 Sumar pe săptămâni (din luna selectată)</h3>
+        <div id="finSumarSaptamani" style="overflow-x:auto"></div>
+      </div>
+
+      <div class="actions" style="margin-top:10px">
+        <button type="button" class="btn-primary" id="btnFinantePDF">📄 Generează PDF</button>
+        <button type="button" class="btn-secondary" id="btnFinanteExcel">📊 Export Excel</button>
+      </div>
     </section>
 
     <!-- TAB: SITUATII DE LUCRARI -->
