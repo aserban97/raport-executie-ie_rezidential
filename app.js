@@ -795,7 +795,9 @@ function renderApartamente() {
       const stari = ['neinceput', 'in_lucru', 'gata', 'blocat'];
       const nume = { neinceput: 'Neînceput', in_lucru: 'În lucru', gata: 'Gata', blocat: 'Blocat' };
       const dur = durataApartament(a.cod);
-      const durTxt = dur ? `\n📅 Început: ${fmtDate(dur.start)}${dur.end ? `, Finalizat: ${fmtDate(dur.end)}` : ' (în lucru)'}\n⏱️ Durată: ${dur.zile} zile` : '\n(Niciun raport încă)';
+      const durTxt = dur
+        ? `\n📅 Început: ${fmtDate(dur.start)}${dur.end ? `, Finalizat: ${fmtDate(dur.end)}` : ' (în lucru)'}\n⏱️ ${dur.zileLucrate} zile lucrate${dur.zileCalendar > dur.zileLucrate ? ` (${dur.zileCalendar} calendar, ${dur.zileLibere} libere/weekend)` : ''}`
+        : '\n(Niciun raport încă)';
       const mpTxt = a.mp ? `\n📐 Suprafață: ${a.mp} mp` : '\n📐 Suprafață: nesetată';
       const manualBadge = (a.perioadaManuala || (a.muncitoriManuali && a.muncitoriManuali.length) || (a.echipeManuale && a.echipeManuale.length)) ? '\n✏️ Are date manuale editate' : '';
       const r = prompt(`${a.cod} (${a.tip})\nStare curentă: ${nume[a.stare || 'neinceput']}${mpTxt}${durTxt}${manualBadge}\n\nIntrodu nr opțiune:\n1. Neînceput\n2. În lucru\n3. Gata\n4. Blocat\n5. Șterge apartament\n6. Editează suprafață (mp)\n7. 📄 Raport detaliat (PDF)\n8. 📊 Raport detaliat (Excel)\n9. ✏️ Editare detaliată (perioadă, oameni, echipe)`, '');
@@ -2903,43 +2905,63 @@ function renderAlerteStoc() {
 }
 
 // ============= DURATĂ REALĂ PER APARTAMENT (în tab Apartamente, info popup) =============
+// Returnează lista cu zile (sortate) în care există rapoarte ce conțin alocare pentru codul dat
+function zileLucrateApartament(cod) {
+  const zile = new Set();
+  state.rapoarte.forEach(r => {
+    r.alocari.forEach(a => {
+      if (a.ap === cod) zile.add(r.data);
+    });
+  });
+  return [...zile].sort();
+}
+
+// Numără câte zile cu rapoarte (orice apartament) există într-un interval — pentru detectare zile de muncă/libere
+function zileCuRapoarteInInterval(startISO, endISO) {
+  const zile = new Set();
+  state.rapoarte.forEach(r => {
+    if (r.data >= startISO && r.data <= endISO) zile.add(r.data);
+  });
+  return zile;
+}
+
 function durataApartament(cod) {
   const ap = state.apartamente.find(x => x.cod === cod);
   if (!ap) return null;
 
+  const zileLucr = zileLucrateApartament(cod);
+
   // Prioritate 1: perioada manuală setată
   if (ap.perioadaManuala && ap.perioadaManuala.start) {
     const start = ap.perioadaManuala.start;
-    const end = ap.perioadaManuala.end || null;
-    if (end) {
-      const zile = Math.max(1, Math.round((new Date(end) - new Date(start)) / 86400000) + 1);
-      return { start, end, zile, status: 'finalizat', manual: true };
-    } else {
-      const azi = todayISO();
-      const zile = Math.max(1, Math.round((new Date(azi) - new Date(start)) / 86400000) + 1);
-      return { start, end: null, zile, status: 'in_lucru', manual: true };
-    }
+    const end = ap.perioadaManuala.end || todayISO();
+    const zileCalendar = Math.max(1, Math.round((new Date(end) - new Date(start)) / 86400000) + 1);
+    // În perioada manuală, "zile lucrate" = zile cu rapoarte ale acestui apartament IN INTERVAL
+    const zileLucrateInPer = zileLucr.filter(z => z >= start && z <= end).length;
+    return {
+      start,
+      end: ap.perioadaManuala.end || null,
+      zile: zileLucrateInPer || zileCalendar, // dacă nu sunt rapoarte încă, afișează durata calendar
+      zileCalendar,
+      zileLibere: zileCalendar - zileLucrateInPer,
+      zileLucrate: zileLucrateInPer,
+      status: ap.perioadaManuala.end ? 'finalizat' : 'in_lucru',
+      manual: true,
+    };
   }
 
-  // Calcul automat din rapoarte (comportament existent)
-  const evenimente = [];
-  state.rapoarte.slice().sort((a, b) => a.data.localeCompare(b.data)).forEach(r => {
-    r.alocari.forEach(a => {
-      if (a.ap === cod) evenimente.push({ data: r.data, stare: a.stareNoua });
-    });
-  });
-  if (evenimente.length === 0) return null;
-  const start = evenimente[0].data;
+  if (zileLucr.length === 0) return null;
+  const start = zileLucr[0];
+  const end = zileLucr[zileLucr.length - 1];
+  const zileCalendar = Math.max(1, Math.round((new Date(end) - new Date(start)) / 86400000) + 1);
+  const zileLucrateNr = zileLucr.length;
+  const zileLibere = zileCalendar - zileLucrateNr;
+
+  // Status finalizat dacă apartamentul are stare 'gata'
   if (ap.stare === 'gata') {
-    const end = evenimente.slice().reverse().find(e => e.stare === 'gata');
-    if (end) {
-      const zile = Math.max(1, Math.round((new Date(end.data) - new Date(start)) / 86400000) + 1);
-      return { start, end: end.data, zile, status: 'finalizat' };
-    }
+    return { start, end, zile: zileLucrateNr, zileCalendar, zileLibere, zileLucrate: zileLucrateNr, status: 'finalizat' };
   }
-  const azi = todayISO();
-  const zile = Math.max(1, Math.round((new Date(azi) - new Date(start)) / 86400000) + 1);
-  return { start, end: null, zile, status: 'in_lucru' };
+  return { start, end, zile: zileLucrateNr, zileCalendar, zileLibere, zileLucrate: zileLucrateNr, status: 'in_lucru' };
 }
 
 // ============= MODAL EDITARE DETALIATĂ APARTAMENT =============
@@ -2996,6 +3018,7 @@ function deschideEditareDetaliata(cod) {
           </label>
         </div>
         <button type="button" id="btnClearPer" class="btn-secondary" style="margin-top:6px;font-size:11px;padding:4px 10px">Folosește auto (șterge manual)</button>
+        <div id="calendarPerioada" style="margin-top:10px"></div>
       </div>
 
       <div class="card" style="border-left:4px solid #f59e0b;margin-bottom:10px">
@@ -3097,7 +3120,63 @@ function deschideEditareDetaliata(cod) {
     document.getElementById('manStart').value = '';
     document.getElementById('manEnd').value = '';
     ap.perioadaManuala = null;
+    refreshCalendar();
   });
+
+  // Calendar perioada — afișează grilă cu zile lucrate / libere
+  function refreshCalendar() {
+    const startVal = document.getElementById('manStart').value;
+    const endVal = document.getElementById('manEnd').value;
+    const cont = document.getElementById('calendarPerioada');
+    if (!cont) return;
+    if (!startVal) { cont.innerHTML = '<p class="small" style="color:#9ca3af">Alege data început pentru a vedea calendar</p>'; return; }
+    const start = startVal;
+    const end = endVal || todayISO();
+    if (end < start) { cont.innerHTML = '<p class="small" style="color:#dc2626">Data sfârșit înainte de început</p>'; return; }
+
+    // Zile cu rapoarte pentru ACEST apartament
+    const zileApart = new Set(zileLucrateApartament(cod));
+    // Zile cu rapoarte oriunde (orice apartament) — pentru a vedea ce zi de muncă a fost vs liber
+    const zileGenerale = zileCuRapoarteInInterval(start, end);
+
+    const NUME_ZI = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
+    let html = '<div style="display:grid;grid-template-columns:repeat(7, 1fr);gap:3px;font-size:10px">';
+    let cursor = new Date(start);
+    const endDate = new Date(end);
+    let zileLucr = 0, zileLibere = 0, zileFolosite = 0;
+    while (cursor <= endDate) {
+      const iso = cursor.toISOString().slice(0, 10);
+      const dow = cursor.getDay();
+      const isWeekend = dow === 0 || dow === 6;
+      const isApartZi = zileApart.has(iso);
+      const isAnyRap = zileGenerale.has(iso);
+      let bg = '#f3f4f6', col = '#9ca3af', label = '·';
+      if (isApartZi) { bg = '#10b981'; col = 'white'; label = '✓'; zileFolosite++; zileLucr++; }
+      else if (isAnyRap) { bg = '#dbeafe'; col = '#1e40af'; label = '○'; zileLucr++; }
+      else if (isWeekend) { bg = '#fef3c7'; col = '#92400e'; label = 'W'; zileLibere++; }
+      else { bg = '#fee2e2'; col = '#991b1b'; label = '×'; zileLibere++; }
+      const day = cursor.getDate();
+      html += `<div style="background:${bg};color:${col};border-radius:4px;padding:3px 2px;text-align:center;font-weight:600" title="${iso}">
+        <div style="font-size:8px">${NUME_ZI[dow]}</div>
+        <div style="font-size:11px">${day}</div>
+        <div style="font-size:9px">${label}</div>
+      </div>`;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    html += '</div>';
+    const totalCal = zileLucr + zileLibere;
+    html += `<div style="margin-top:8px;font-size:11px;display:flex;gap:10px;flex-wrap:wrap">
+      <span><span style="display:inline-block;width:10px;height:10px;background:#10b981;border-radius:2px;vertical-align:middle"></span> ${zileFolosite} zile lucrate acest ap.</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:#dbeafe;border-radius:2px;vertical-align:middle"></span> ${zileLucr - zileFolosite} la alt apartament</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:#fef3c7;border-radius:2px;vertical-align:middle"></span> weekend</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:#fee2e2;border-radius:2px;vertical-align:middle"></span> liber (zi lucrătoare fără raport)</span>
+    </div>
+    <p class="small" style="margin-top:4px;color:#1e40af;font-weight:600">📊 ${totalCal} zile calendar = ${zileLucr} zile cu activitate + ${zileLibere} zile libere/weekend</p>`;
+    cont.innerHTML = html;
+  }
+  document.getElementById('manStart').addEventListener('change', refreshCalendar);
+  document.getElementById('manEnd').addEventListener('change', refreshCalendar);
+  setTimeout(refreshCalendar, 50);
   document.getElementById('btnSaveEdit').addEventListener('click', () => {
     const s = document.getElementById('manStart').value;
     const e = document.getElementById('manEnd').value;
@@ -5842,7 +5921,7 @@ function colecteazaApartament(cod) {
   const omZileTotal = rapZi.reduce((s, z) => s + z.oameni, 0);
 
   // Durata calendar (prima → ultima) — FOLOSEȘTE perioada manuală dacă există
-  let durataCalendar = 0, dataStart = null, dataEnd = null;
+  let durataCalendar = 0, dataStart = null, dataEnd = null, zileLibere = 0;
   if (ap && ap.perioadaManuala && ap.perioadaManuala.start) {
     dataStart = ap.perioadaManuala.start;
     dataEnd = ap.perioadaManuala.end || todayISO();
@@ -5851,6 +5930,9 @@ function colecteazaApartament(cod) {
     dataStart = rapZi[0].data;
     dataEnd = rapZi[rapZi.length - 1].data;
     durataCalendar = Math.round((new Date(dataEnd) - new Date(dataStart)) / 86400000) + 1;
+  }
+  if (durataCalendar > 0) {
+    zileLibere = Math.max(0, durataCalendar - zileLucr.size);
   }
 
   // Adăug muncitori manuali în muncitoriZile (cu fuziune dacă există deja)
@@ -5869,7 +5951,7 @@ function colecteazaApartament(cod) {
   // Adăug echipele manuale (pentru clasament + KPI)
   const echipeManuale = (ap && ap.echipeManuale) ? ap.echipeManuale : [];
 
-  return { ap, rapZi, totalMat, muncitoriZile, echipaDom, valoareEur, totalMetri, zileLucr, omZileTotal, durataCalendar, dataStart, dataEnd, echipeManuale };
+  return { ap, rapZi, totalMat, muncitoriZile, echipaDom, valoareEur, totalMetri, zileLucr, omZileTotal, durataCalendar, zileLibere, dataStart, dataEnd, echipeManuale };
 }
 
 function genereazaRaportApartamentPDF(cod) {
@@ -5983,8 +6065,8 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600}
     <div><b>Executant:</b> ${state.firmaNume || 'iFort Systems SRL'}</div>
     <div><b>Prima zi:</b> ${fmtDate(d.dataStart)}</div>
     <div><b>Ultima zi:</b> ${fmtDate(d.dataEnd)}</div>
-    <div><b>Durata calendar:</b> ${d.durataCalendar} zile</div>
     <div><b>Zile lucrate:</b> ${d.zileLucr.size}</div>
+    <div><b>Durata calendar:</b> ${d.durataCalendar} zile <span style="color:#9ca3af">(${d.zileLibere || 0} libere/weekend)</span></div>
     <div><b>Om-zile total:</b> ${d.omZileTotal}</div>
     <div><b>Echipa dominantă:</b> ${d.echipaDom ? `<span style="background:${d.echipaDom.culoare};color:white;padding:1px 6px;border-radius:6px">${d.echipaDom.nume}</span>` : '—'}</div>
   </div>
@@ -6239,8 +6321,8 @@ function genereazaRaportConsolidatPDF() {
   <div class="info-grid-sm">
     <div><b>Prima zi:</b> ${fmtDate(d.dataStart)}</div>
     <div><b>Ultima zi:</b> ${fmtDate(d.dataEnd)}</div>
-    <div><b>Durata calendar:</b> ${d.durataCalendar} zile</div>
     <div><b>Zile lucrate:</b> ${d.zileLucr.size}</div>
+    <div><b>Durata calendar:</b> ${d.durataCalendar} zile <span style="color:#9ca3af">(${d.zileLibere || 0} libere/weekend)</span></div>
     <div><b>Om-zile total:</b> ${d.omZileTotal}</div>
     <div><b>Echipa dominantă:</b> ${d.echipaDom ? `<span style="background:${d.echipaDom.culoare};color:white;padding:1px 6px;border-radius:6px;font-size:10px">${d.echipaDom.nume}</span>` : '—'}</div>
   </div>
