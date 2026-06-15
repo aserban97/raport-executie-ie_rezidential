@@ -2091,6 +2091,7 @@ function renderPersonal() {
   renderSumarPrezenta();
   renderEchipe();
   if (typeof renderClasament === 'function') renderClasament();
+  if (typeof renderRaportApartamente === 'function') renderRaportApartamente();
 
   // Start date default azi
   const startInput = document.getElementById('muncitorStart');
@@ -6710,9 +6711,15 @@ function calculeazaClasamente() {
       perEch[a.echipaId].eur += eurAloc;
 
       // SNAPSHOT: folosesc membriEchipa din alocare (corect istoric), nu echipa curentă
-      const membri = (a.membriEchipa && a.membriEchipa.length)
+      let membri = (a.membriEchipa && a.membriEchipa.length)
         ? a.membriEchipa
         : (state.echipe.find(x => x.id === a.echipaId)?.codMembri || []);
+      // FILTRU: exclud muncitorii care n-au început încă (dataStart > data raport)
+      membri = membri.filter(cm => {
+        const munc = state.muncitori.find(x => x.cod === cm);
+        if (!munc || !munc.dataStart) return true;
+        return r.data >= munc.dataStart;
+      });
       const cota = membri.length || 1;
       membri.forEach(cm => {
         initMunc(cm);
@@ -6809,6 +6816,87 @@ function calculeazaClasamente() {
     muncitori: muncTot.sort((a, b) => b.scor - a.scor),
     echipe: Object.values(perEch).sort((a, b) => b.scor - a.scor),
   };
+}
+
+function calculeazaRaportApartamente() {
+  // Per apartament: zile lucrate, metri, EUR, echipe, muncitori (din snapshot)
+  const perAp = {};
+  const stareAp = {};
+  state.apartamente.forEach(ap => { stareAp[ap.cod] = ap; });
+
+  state.rapoarte.forEach(r => {
+    r.alocari.forEach(a => {
+      if (!perAp[a.ap]) perAp[a.ap] = {
+        cod: a.ap,
+        zileSet: new Set(),
+        metri: 0, eur: 0,
+        echipe: {}, // echipaId → Set de zile
+        muncitori: {}, // cod → Set de zile
+        materiale: {},
+      };
+      const P = perAp[a.ap];
+      P.zileSet.add(r.data);
+
+      let metriAloc = 0, eurAloc = 0;
+      Object.entries(a.materiale || {}).forEach(([k, v]) => {
+        const m = state.materiale.find(x => x.id === k);
+        if (esteMaterialMetri(k)) metriAloc += v;
+        if (esteMaterialFacturabil(k)) eurAloc += v * (m?.pretEur || 0);
+        P.materiale[k] = (P.materiale[k] || 0) + v;
+      });
+      P.metri += metriAloc;
+      P.eur += eurAloc;
+
+      if (a.echipaId) {
+        if (!P.echipe[a.echipaId]) P.echipe[a.echipaId] = new Set();
+        P.echipe[a.echipaId].add(r.data);
+
+        // Muncitori (snapshot cu filtru dataStart)
+        let membri = (a.membriEchipa && a.membriEchipa.length)
+          ? a.membriEchipa
+          : (state.echipe.find(x => x.id === a.echipaId)?.codMembri || []);
+        membri = membri.filter(cm => {
+          const munc = state.muncitori.find(x => x.cod === cm);
+          if (!munc || !munc.dataStart) return true;
+          return r.data >= munc.dataStart;
+        });
+        membri.forEach(cm => {
+          if (!P.muncitori[cm]) P.muncitori[cm] = new Set();
+          P.muncitori[cm].add(r.data);
+        });
+      }
+    });
+  });
+
+  // Convertesc seturile în obiecte ușor de afișat
+  const lista = Object.values(perAp).map(P => {
+    const ap = stareAp[P.cod];
+    const echipe = Object.entries(P.echipe).map(([eid, zs]) => {
+      const e = state.echipe.find(x => x.id === eid);
+      return { id: eid, nume: e?.nume || '—', culoare: e?.culoare || '#9ca3af', zile: zs.size };
+    }).sort((a, b) => b.zile - a.zile);
+    const muncitori = Object.entries(P.muncitori).map(([c, zs]) => {
+      const m = state.muncitori.find(x => x.cod === c);
+      return { cod: c, nume: m?.nume || '—', zile: zs.size };
+    }).sort((a, b) => b.zile - a.zile);
+    return {
+      cod: P.cod,
+      tip: ap?.tip || '—',
+      mp: ap?.mp || 0,
+      stare: ap?.stare || '—',
+      zile: P.zileSet.size,
+      metri: Math.round(P.metri),
+      eur: P.eur,
+      echipe,
+      muncitori,
+    };
+  });
+
+  // Sortare: stări prioritate, apoi metri desc
+  const stareOrder = { 'gata': 1, 'in_lucru': 2, 'blocat': 3, 'neinceput': 4 };
+  lista.sort((a, b) => (stareOrder[a.stare] || 5) - (stareOrder[b.stare] || 5) || b.metri - a.metri);
+
+  return lista;
 }
 
 function renderClasament() {
@@ -6921,9 +7009,59 @@ function renderClasament() {
   }
 }
 
+function renderRaportApartamente() {
+  const cont = document.getElementById('raportApartamente');
+  if (!cont) return;
+  const lista = calculeazaRaportApartamente();
+  if (lista.length === 0) { cont.innerHTML = '<div class="empty">Niciun apartament cu activitate</div>'; return; }
+
+  const stareLabel = { 'gata': '✅ Gata', 'in_lucru': '🔧 În lucru', 'blocat': '🚫 Blocat', 'neinceput': '⏸️ Neînceput' };
+  const stareCulori = { 'gata': '#10b981', 'in_lucru': '#f59e0b', 'blocat': '#dc2626', 'neinceput': '#9ca3af' };
+
+  let html = '<h4 style="color:#1e40af;margin:8px 0 6px;font-size:13px">🏢 Raport pe apartamente (din rapoartele zilnice)</h4>';
+  html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:700px"><thead><tr>';
+  ['Apartament', 'Stare', 'Zile', 'Metri', 'EUR', 'Echipe', 'Muncitori'].forEach((h, i) => {
+    const align = i === 0 ? 'left' : (i >= 5 ? 'left' : 'center');
+    html += `<th style="text-align:${align};padding:5px;background:#1e40af;color:white">${h}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+  lista.forEach(ap => {
+    const echipeStr = ap.echipe.length === 0
+      ? '<span style="color:#9ca3af">—</span>'
+      : ap.echipe.map(e => `<span style="display:inline-block;background:${e.culoare};color:white;padding:1px 5px;border-radius:3px;font-size:9px;margin-right:2px">${e.nume} (${e.zile}z)</span>`).join('');
+    const muncStr = ap.muncitori.length === 0
+      ? '<span style="color:#9ca3af">—</span>'
+      : ap.muncitori.map(m => `<span title="${m.cod}" style="display:inline-block;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;font-size:9px;margin-right:2px">${m.nume.split(' ')[0]} (${m.zile}z)</span>`).join('');
+    html += `<tr style="border-bottom:1px solid #f3f4f6">
+      <td style="padding:5px"><b>${ap.cod}</b> <span style="font-size:9px;color:#6b7280">${ap.tip}${ap.mp ? ` • ${ap.mp}mp` : ''}</span></td>
+      <td style="padding:5px;text-align:center"><span style="color:${stareCulori[ap.stare] || '#9ca3af'};font-weight:600;font-size:10px">${stareLabel[ap.stare] || ap.stare}</span></td>
+      <td style="padding:5px;text-align:center;font-weight:600">${ap.zile}</td>
+      <td style="padding:5px;text-align:center;color:#1e40af;font-weight:600">${ap.metri}</td>
+      <td style="padding:5px;text-align:center;color:#10b981;font-size:10px">${ap.eur.toFixed(0)} €</td>
+      <td style="padding:5px">${echipeStr}</td>
+      <td style="padding:5px">${muncStr}</td>
+    </tr>`;
+  });
+  const totalZile = lista.reduce((s, a) => s + a.zile, 0);
+  const totalMetri = lista.reduce((s, a) => s + a.metri, 0);
+  const totalEur = lista.reduce((s, a) => s + a.eur, 0);
+  html += `<tr style="background:#1e40af;color:white;font-weight:700">
+    <td style="padding:6px">TOTAL ${lista.length} ap.</td>
+    <td></td>
+    <td style="text-align:center">${totalZile}</td>
+    <td style="text-align:center">${totalMetri}</td>
+    <td style="text-align:center">${totalEur.toFixed(0)} €</td>
+    <td colspan="2"></td>
+  </tr>`;
+  html += '</tbody></table></div>';
+  html += '<p class="small" style="margin-top:8px;color:#6b7280;font-size:10px">Zile = nr. zile distincte cu rapoarte la acest apartament. Metri = tub + cabluri + jgheab. Muncitori = membri echipei din ziua respectivă (snapshot), filtrați după data start.</p>';
+  cont.innerHTML = html;
+}
+
 function genereazaClasamentPDF() {
   const c = calculeazaClasamente();
-  if (c.muncitori.length === 0 && c.echipe.length === 0) { toast('Nicio activitate'); return; }
+  const lista = calculeazaRaportApartamente();
+  if (c.muncitori.length === 0 && c.echipe.length === 0 && lista.length === 0) { toast('Nicio activitate'); return; }
   const medals = ['🥇', '🥈', '🥉'];
 
   let vetRows = c.veterani.map((m, i) => {
@@ -6933,6 +7071,17 @@ function genereazaClasamentPDF() {
   let nouRows = c.nouVeniti.map((m, i) => {
     return `<tr><td style="text-align:center">${i + 1}</td><td><b>${m.cod}</b></td><td>${m.nume}</td><td style="text-align:center">${m.zileTotal}</td><td style="text-align:center;color:#92400e;font-weight:700">${Math.round(m.metriPeZi)}</td><td style="text-align:center">${m.metri}</td><td style="text-align:right;font-size:10px">🆕 ${m.zileTotal} ${m.zileTotal === 1 ? 'zi' : 'zile'}</td></tr>`;
   }).join('');
+  const stareLabel = { 'gata': 'Gata', 'in_lucru': 'În lucru', 'blocat': 'Blocat', 'neinceput': 'Neînceput' };
+  let apRows = lista.map(ap => {
+    const echStr = ap.echipe.length === 0 ? '—' : ap.echipe.map(e => `${e.nume}(${e.zile}z)`).join(', ');
+    const munStr = ap.muncitori.length === 0 ? '—' : ap.muncitori.map(m => `${m.nume.split(' ')[0]}(${m.zile}z)`).join(', ');
+    return `<tr><td><b>${ap.cod}</b><br><span style="font-size:9px;color:#6b7280">${ap.tip}${ap.mp ? ` • ${ap.mp}mp` : ''}</span></td><td style="text-align:center">${stareLabel[ap.stare] || ap.stare}</td><td style="text-align:center">${ap.zile}</td><td style="text-align:center;color:#1e40af;font-weight:700">${ap.metri}</td><td style="text-align:right;color:#10b981;font-weight:700">${ap.eur.toFixed(0)} €</td><td style="font-size:10px">${echStr}</td><td style="font-size:10px">${munStr}</td></tr>`;
+  }).join('');
+  const totalZileAp = lista.reduce((s, a) => s + a.zile, 0);
+  const totalMetriAp = lista.reduce((s, a) => s + a.metri, 0);
+  const totalEurAp = lista.reduce((s, a) => s + a.eur, 0);
+  apRows += `<tr style="background:#1e40af;color:white;font-weight:700"><td>TOTAL ${lista.length} ap.</td><td></td><td style="text-align:center">${totalZileAp}</td><td style="text-align:center">${totalMetriAp}</td><td style="text-align:right">${totalEurAp.toFixed(0)} €</td><td colspan="2"></td></tr>`;
+
   let echRows = c.echipe.map((e, i) => {
     const medal = medals[i] || `${i + 1}`;
     const membriNume = (e.codMembri || []).map(c => {
@@ -6992,7 +7141,13 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600}
     <tbody>${echRows || '<tr><td colspan="8" style="text-align:center;color:#9ca3af">Nimic</td></tr>'}</tbody>
   </table>
 
-  <p style="font-size:10px;color:#6b7280"><b>Scor</b> = √zile × (m/zi) ÷ 10 + finalizate × 15. <b>m/zi</b> = producție medie zilnică (tub + cabluri + jgheab). <b>Total m</b> = atribuit proporțional cu zilele lucrate. Zile = auto din rapoarte + manuale din editarea apartamentelor.</p>
+  <h2>🏢 Raport pe apartamente</h2>
+  <table>
+    <thead><tr><th>Apartament</th><th style="text-align:center">Stare</th><th style="text-align:center">Zile</th><th style="text-align:center">Metri</th><th style="text-align:right">EUR</th><th>Echipe</th><th>Muncitori</th></tr></thead>
+    <tbody>${apRows || '<tr><td colspan="7" style="text-align:center;color:#9ca3af">Nimic</td></tr>'}</tbody>
+  </table>
+
+  <p style="font-size:10px;color:#6b7280"><b>Scor</b> = √zile × (m/zi) ÷ 10 + finalizate × 15. <b>m/zi</b> = producție medie zilnică (tub + cabluri + jgheab). <b>Total m</b> = atribuit proporțional cu zilele lucrate. Muncitorii sunt din snapshot membri echipa la momentul raportului (filtrați după data start).</p>
   <div class="footer">Document intern — ${state.firmaNume || 'iFort Systems SRL'} — ${fmtDate(todayISO())}</div>
 </div>
 </body></html>`;
@@ -7003,7 +7158,7 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600}
 document.addEventListener('DOMContentLoaded', () => {
   const bR = document.getElementById('btnRefreshClasament');
   const bP = document.getElementById('btnClasamentPDF');
-  if (bR) bR.addEventListener('click', renderClasament);
+  if (bR) bR.addEventListener('click', () => { renderClasament(); renderRaportApartamente(); });
   if (bP) bP.addEventListener('click', genereazaClasamentPDF);
 });
 
