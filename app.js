@@ -785,17 +785,20 @@ function renderApartamente() {
   }
   cont.innerHTML = '';
   lista.forEach(a => {
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'position:relative;display:inline-block;margin:2px';
+
     const cell = document.createElement('div');
     cell.className = 'ap-cell ' + (a.stare || 'neinceput');
     cell.innerHTML = `${a.cod}<span class="tip">${a.tip}${a.mp ? ` • ${a.mp}mp` : ''}</span>`;
     cell.addEventListener('click', () => {
       const stari = ['neinceput', 'in_lucru', 'gata', 'blocat'];
       const nume = { neinceput: 'Neînceput', in_lucru: 'În lucru', gata: 'Gata', blocat: 'Blocat' };
-      const optHTML = stari.map(s => `${s === a.stare ? '→' : '  '} ${nume[s]}`).join('\n');
       const dur = durataApartament(a.cod);
       const durTxt = dur ? `\n📅 Început: ${fmtDate(dur.start)}${dur.end ? `, Finalizat: ${fmtDate(dur.end)}` : ' (în lucru)'}\n⏱️ Durată: ${dur.zile} zile` : '\n(Niciun raport încă)';
       const mpTxt = a.mp ? `\n📐 Suprafață: ${a.mp} mp` : '\n📐 Suprafață: nesetată';
-      const r = prompt(`${a.cod} (${a.tip})\nStare curentă: ${nume[a.stare || 'neinceput']}${mpTxt}${durTxt}\n\nIntrodu nr opțiune:\n1. Neînceput\n2. În lucru\n3. Gata\n4. Blocat\n5. Șterge apartament\n6. Editează suprafață (mp)\n7. 📄 Raport detaliat (PDF)\n8. 📊 Raport detaliat (Excel)`, '');
+      const manualBadge = (a.perioadaManuala || (a.muncitoriManuali && a.muncitoriManuali.length) || (a.echipeManuale && a.echipeManuale.length)) ? '\n✏️ Are date manuale editate' : '';
+      const r = prompt(`${a.cod} (${a.tip})\nStare curentă: ${nume[a.stare || 'neinceput']}${mpTxt}${durTxt}${manualBadge}\n\nIntrodu nr opțiune:\n1. Neînceput\n2. În lucru\n3. Gata\n4. Blocat\n5. Șterge apartament\n6. Editează suprafață (mp)\n7. 📄 Raport detaliat (PDF)\n8. 📊 Raport detaliat (Excel)\n9. ✏️ Editare detaliată (perioadă, oameni, echipe)`, '');
       if (!r) return;
       if (r === '5') {
         if (confirm(`Ștergi ${a.cod}?`)) {
@@ -815,10 +818,33 @@ function renderApartamente() {
       }
       if (r === '7') { genereazaRaportApartamentPDF(a.cod); return; }
       if (r === '8') { genereazaRaportApartamentExcel(a.cod); return; }
+      if (r === '9') { deschideEditareDetaliata(a.cod); return; }
       const idx = parseInt(r, 10) - 1;
       if (idx >= 0 && idx < stari.length) { a.stare = stari[idx]; save(); renderApartamente(); }
     });
-    cont.appendChild(cell);
+
+    // Buton vizibil de editare în colț
+    const btnEdit = document.createElement('button');
+    btnEdit.type = 'button';
+    btnEdit.title = 'Editare detaliată';
+    btnEdit.innerHTML = '✏️';
+    btnEdit.style.cssText = 'position:absolute;top:2px;right:2px;background:rgba(255,255,255,0.9);border:1px solid #d1d5db;border-radius:4px;width:22px;height:22px;cursor:pointer;font-size:11px;padding:0;line-height:1;z-index:2';
+    btnEdit.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      deschideEditareDetaliata(a.cod);
+    });
+
+    // Indicator dacă există editări manuale
+    if (a.perioadaManuala || (a.muncitoriManuali && a.muncitoriManuali.length) || (a.echipeManuale && a.echipeManuale.length)) {
+      const dot = document.createElement('span');
+      dot.style.cssText = 'position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:#f59e0b;z-index:2';
+      dot.title = 'Are editări manuale';
+      wrapper.appendChild(dot);
+    }
+
+    wrapper.appendChild(cell);
+    wrapper.appendChild(btnEdit);
+    cont.appendChild(wrapper);
   });
 }
 
@@ -2044,6 +2070,7 @@ function renderPersonal() {
   renderMuncitoriIstoric();
   renderSumarPrezenta();
   renderEchipe();
+  if (typeof renderClasament === 'function') renderClasament();
 
   // Start date default azi
   const startInput = document.getElementById('muncitorStart');
@@ -2877,6 +2904,24 @@ function renderAlerteStoc() {
 
 // ============= DURATĂ REALĂ PER APARTAMENT (în tab Apartamente, info popup) =============
 function durataApartament(cod) {
+  const ap = state.apartamente.find(x => x.cod === cod);
+  if (!ap) return null;
+
+  // Prioritate 1: perioada manuală setată
+  if (ap.perioadaManuala && ap.perioadaManuala.start) {
+    const start = ap.perioadaManuala.start;
+    const end = ap.perioadaManuala.end || null;
+    if (end) {
+      const zile = Math.max(1, Math.round((new Date(end) - new Date(start)) / 86400000) + 1);
+      return { start, end, zile, status: 'finalizat', manual: true };
+    } else {
+      const azi = todayISO();
+      const zile = Math.max(1, Math.round((new Date(azi) - new Date(start)) / 86400000) + 1);
+      return { start, end: null, zile, status: 'in_lucru', manual: true };
+    }
+  }
+
+  // Calcul automat din rapoarte (comportament existent)
   const evenimente = [];
   state.rapoarte.slice().sort((a, b) => a.data.localeCompare(b.data)).forEach(r => {
     r.alocari.forEach(a => {
@@ -2885,8 +2930,6 @@ function durataApartament(cod) {
   });
   if (evenimente.length === 0) return null;
   const start = evenimente[0].data;
-  const ap = state.apartamente.find(x => x.cod === cod);
-  if (!ap) return null;
   if (ap.stare === 'gata') {
     const end = evenimente.slice().reverse().find(e => e.stare === 'gata');
     if (end) {
@@ -2897,6 +2940,176 @@ function durataApartament(cod) {
   const azi = todayISO();
   const zile = Math.max(1, Math.round((new Date(azi) - new Date(start)) / 86400000) + 1);
   return { start, end: null, zile, status: 'in_lucru' };
+}
+
+// ============= MODAL EDITARE DETALIATĂ APARTAMENT =============
+function deschideEditareDetaliata(cod) {
+  const ap = state.apartamente.find(x => x.cod === cod);
+  if (!ap) return;
+
+  // Asigur structurile (fără să șterg nimic existent)
+  if (!ap.perioadaManuala) ap.perioadaManuala = null;
+  if (!ap.muncitoriManuali) ap.muncitoriManuali = [];
+  if (!ap.echipeManuale) ap.echipeManuale = [];
+
+  // Calcul auto pentru comparație (din rapoarte)
+  const durAuto = (function () {
+    const ev = [];
+    state.rapoarte.slice().sort((a, b) => a.data.localeCompare(b.data)).forEach(r => {
+      r.alocari.forEach(a => { if (a.ap === cod) ev.push({ data: r.data, stare: a.stareNoua }); });
+    });
+    if (ev.length === 0) return null;
+    return { start: ev[0].data, end: ev[ev.length - 1].data };
+  })();
+
+  // Creez modalul
+  const oldModal = document.getElementById('modalEditAp');
+  if (oldModal) oldModal.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'modalEditAp';
+  modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto';
+
+  const muncActivi = state.muncitori.filter(m => !m.dataEnd || m.dataEnd >= todayISO());
+  const muncOpts = muncActivi.map(m => `<option value="${m.cod}">${m.cod} — ${m.nume}</option>`).join('');
+  const echOpts = state.echipe.map(e => `<option value="${e.id}">${e.nume}</option>`).join('');
+
+  modal.innerHTML = `
+    <div style="background:white;max-width:700px;width:100%;border-radius:12px;padding:18px;box-shadow:0 8px 24px rgba(0,0,0,0.15);margin-top:30px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;border-bottom:2px solid #1e40af;padding-bottom:8px">
+        <h3 style="margin:0;color:#1e40af">✏️ Editare detaliată: ${cod}</h3>
+        <button type="button" id="btnModalClose" style="background:#dc2626;color:white;border:none;border-radius:6px;width:30px;height:30px;cursor:pointer;font-size:16px">×</button>
+      </div>
+      <p class="small" style="margin:0 0 10px;color:#6b7280">${ap.tip} • ${ap.mp || '?'} mp • ${ap.stare || 'neînceput'}</p>
+
+      <div class="card" style="border-left:4px solid #1e40af;margin-bottom:10px">
+        <h4 style="margin:0 0 8px;color:#1e40af;font-size:13px">📅 Perioada manuală (înlocuiește calculul automat)</h4>
+        ${durAuto ? `<p class="small">Auto din rapoarte: ${fmtDate(durAuto.start)} → ${fmtDate(durAuto.end)}</p>` : '<p class="small">Niciun raport încă</p>'}
+        <div class="row">
+          <label style="margin:0">
+            Data început
+            <input type="date" id="manStart" value="${ap.perioadaManuala?.start || ''}" />
+          </label>
+          <label style="margin:0">
+            Data sfârșit (gol = în lucru)
+            <input type="date" id="manEnd" value="${ap.perioadaManuala?.end || ''}" />
+          </label>
+        </div>
+        <button type="button" id="btnClearPer" class="btn-secondary" style="margin-top:6px;font-size:11px;padding:4px 10px">Folosește auto (șterge manual)</button>
+      </div>
+
+      <div class="card" style="border-left:4px solid #f59e0b;margin-bottom:10px">
+        <h4 style="margin:0 0 8px;color:#92400e;font-size:13px">👷 Muncitori adăugați manual</h4>
+        <div id="listaMuncManuali"></div>
+        <div class="row" style="margin-top:6px">
+          <label style="margin:0">
+            Muncitor
+            <select id="newMuncSel">${muncOpts || '<option value="">Niciun muncitor activ</option>'}</select>
+          </label>
+          <label style="margin:0">
+            Zile
+            <input type="number" id="newMuncZile" min="0" step="0.5" placeholder="ex: 3" />
+          </label>
+          <label style="margin:0">
+            Ore (opțional)
+            <input type="number" id="newMuncOre" min="0" step="0.5" placeholder="ex: 24" />
+          </label>
+        </div>
+        <button type="button" id="btnAddMunc" class="btn-secondary" style="margin-top:6px;font-size:11px;padding:4px 10px">+ Adaugă muncitor</button>
+      </div>
+
+      <div class="card" style="border-left:4px solid #10b981;margin-bottom:10px">
+        <h4 style="margin:0 0 8px;color:#065f46;font-size:13px">🏗️ Echipe adăugate manual</h4>
+        <div id="listaEchManuale"></div>
+        <div class="row" style="margin-top:6px">
+          <label style="margin:0">
+            Echipă
+            <select id="newEchSel">${echOpts || '<option value="">Nicio echipă</option>'}</select>
+          </label>
+          <label style="margin:0">
+            Zile
+            <input type="number" id="newEchZile" min="0" step="0.5" placeholder="ex: 5" />
+          </label>
+        </div>
+        <button type="button" id="btnAddEch" class="btn-secondary" style="margin-top:6px;font-size:11px;padding:4px 10px">+ Adaugă echipă</button>
+      </div>
+
+      <div class="actions" style="margin-top:14px">
+        <button type="button" class="btn-primary" id="btnSaveEdit">💾 Salvează modificările</button>
+        <button type="button" class="btn-secondary" id="btnCancelEdit">Anulează</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  function refreshLists() {
+    const cm = document.getElementById('listaMuncManuali');
+    cm.innerHTML = ap.muncitoriManuali.length === 0
+      ? '<p class="small" style="color:#9ca3af">Niciunul adăugat</p>'
+      : ap.muncitoriManuali.map((m, i) => {
+          const munc = state.muncitori.find(x => x.cod === m.cod);
+          return `<div style="display:flex;align-items:center;gap:8px;padding:5px;background:#fef3c7;border-radius:4px;margin-bottom:4px">
+            <span style="flex:1;font-size:12px"><b>${m.cod}</b> — ${munc?.nume || '?'} • ${m.zile} zile${m.ore ? ` • ${m.ore}h` : ''}</span>
+            <button type="button" class="btn-del" data-del-munc="${i}" style="font-size:10px;padding:2px 8px">×</button>
+          </div>`;
+        }).join('');
+    cm.querySelectorAll('[data-del-munc]').forEach(b => b.addEventListener('click', () => {
+      ap.muncitoriManuali.splice(parseInt(b.dataset.delMunc), 1);
+      refreshLists();
+    }));
+
+    const ce = document.getElementById('listaEchManuale');
+    ce.innerHTML = ap.echipeManuale.length === 0
+      ? '<p class="small" style="color:#9ca3af">Niciuna adăugată</p>'
+      : ap.echipeManuale.map((em, i) => {
+          const ech = state.echipe.find(x => x.id === em.echipaId);
+          return `<div style="display:flex;align-items:center;gap:8px;padding:5px;background:#d1fae5;border-radius:4px;margin-bottom:4px">
+            <span style="flex:1;font-size:12px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${ech?.culoare || '#9ca3af'};margin-right:4px"></span><b>${ech?.nume || '?'}</b> • ${em.zile} zile</span>
+            <button type="button" class="btn-del" data-del-ech="${i}" style="font-size:10px;padding:2px 8px">×</button>
+          </div>`;
+        }).join('');
+    ce.querySelectorAll('[data-del-ech]').forEach(b => b.addEventListener('click', () => {
+      ap.echipeManuale.splice(parseInt(b.dataset.delEch), 1);
+      refreshLists();
+    }));
+  }
+  refreshLists();
+
+  document.getElementById('btnAddMunc').addEventListener('click', () => {
+    const cod = document.getElementById('newMuncSel').value;
+    const zile = parseFloat(document.getElementById('newMuncZile').value);
+    const ore = parseFloat(document.getElementById('newMuncOre').value) || 0;
+    if (!cod || !(zile > 0)) { toast('Alege muncitorul și introdu zile'); return; }
+    ap.muncitoriManuali.push({ cod, zile, ore });
+    document.getElementById('newMuncZile').value = '';
+    document.getElementById('newMuncOre').value = '';
+    refreshLists();
+  });
+  document.getElementById('btnAddEch').addEventListener('click', () => {
+    const echipaId = document.getElementById('newEchSel').value;
+    const zile = parseFloat(document.getElementById('newEchZile').value);
+    if (!echipaId || !(zile > 0)) { toast('Alege echipa și introdu zile'); return; }
+    ap.echipeManuale.push({ echipaId, zile });
+    document.getElementById('newEchZile').value = '';
+    refreshLists();
+  });
+  document.getElementById('btnClearPer').addEventListener('click', () => {
+    document.getElementById('manStart').value = '';
+    document.getElementById('manEnd').value = '';
+    ap.perioadaManuala = null;
+  });
+  document.getElementById('btnSaveEdit').addEventListener('click', () => {
+    const s = document.getElementById('manStart').value;
+    const e = document.getElementById('manEnd').value;
+    if (s) ap.perioadaManuala = { start: s, end: e || null };
+    else ap.perioadaManuala = null;
+    save();
+    renderApartamente();
+    modal.remove();
+    toast(`✓ ${cod} actualizat`);
+  });
+  document.getElementById('btnCancelEdit').addEventListener('click', () => modal.remove());
+  document.getElementById('btnModalClose').addEventListener('click', () => modal.remove());
 }
 
 // ============= SITUAȚII DE LUCRĂRI =============
@@ -5628,15 +5841,35 @@ function colecteazaApartament(cod) {
   const zileLucr = new Set(rapZi.map(z => z.data));
   const omZileTotal = rapZi.reduce((s, z) => s + z.oameni, 0);
 
-  // Durata calendar (prima → ultima)
+  // Durata calendar (prima → ultima) — FOLOSEȘTE perioada manuală dacă există
   let durataCalendar = 0, dataStart = null, dataEnd = null;
-  if (rapZi.length > 0) {
+  if (ap && ap.perioadaManuala && ap.perioadaManuala.start) {
+    dataStart = ap.perioadaManuala.start;
+    dataEnd = ap.perioadaManuala.end || todayISO();
+    durataCalendar = Math.max(1, Math.round((new Date(dataEnd) - new Date(dataStart)) / 86400000) + 1);
+  } else if (rapZi.length > 0) {
     dataStart = rapZi[0].data;
     dataEnd = rapZi[rapZi.length - 1].data;
     durataCalendar = Math.round((new Date(dataEnd) - new Date(dataStart)) / 86400000) + 1;
   }
 
-  return { ap, rapZi, totalMat, muncitoriZile, echipaDom, valoareEur, totalMetri, zileLucr, omZileTotal, durataCalendar, dataStart, dataEnd };
+  // Adăug muncitori manuali în muncitoriZile (cu fuziune dacă există deja)
+  if (ap && ap.muncitoriManuali) {
+    ap.muncitoriManuali.forEach(mm => {
+      if (!muncitoriZile[mm.cod]) {
+        const m = state.muncitori.find(x => x.cod === mm.cod);
+        muncitoriZile[mm.cod] = { cod: mm.cod, nume: m ? m.nume : '—', zileSet: new Set(), oreTotal: 0, manualZile: 0, manualOre: 0 };
+      }
+      muncitoriZile[mm.cod].manualZile = (muncitoriZile[mm.cod].manualZile || 0) + (mm.zile || 0);
+      muncitoriZile[mm.cod].manualOre = (muncitoriZile[mm.cod].manualOre || 0) + (mm.ore || 0);
+      muncitoriZile[mm.cod].oreTotal += (mm.ore || 0);
+    });
+  }
+
+  // Adăug echipele manuale (pentru clasament + KPI)
+  const echipeManuale = (ap && ap.echipeManuale) ? ap.echipeManuale : [];
+
+  return { ap, rapZi, totalMat, muncitoriZile, echipaDom, valoareEur, totalMetri, zileLucr, omZileTotal, durataCalendar, dataStart, dataEnd, echipeManuale };
 }
 
 function genereazaRaportApartamentPDF(cod) {
@@ -6181,6 +6414,246 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnPDF) btnPDF.addEventListener('click', genereazaRaportConsolidatPDF);
   if (btnXls) btnXls.addEventListener('click', genereazaRaportConsolidatExcel);
   setTimeout(updateFiltruRapInfo, 500);
+});
+
+// ============= CLASAMENT MUNCITORI + ECHIPE =============
+function calculeazaClasamente() {
+  // Per muncitor: nr apartamente atinse, zile total (auto + manual), ore total, valoare EUR aproximată
+  const perMunc = {};
+  const perEch = {};
+
+  function initMunc(cod) {
+    if (perMunc[cod]) return;
+    const m = state.muncitori.find(x => x.cod === cod);
+    perMunc[cod] = { cod, nume: m ? m.nume : '—', apartamente: new Set(), zile: 0, zileSet: new Set(), ore: 0, eurAprox: 0 };
+  }
+  function initEch(id) {
+    if (perEch[id]) return;
+    const e = state.echipe.find(x => x.id === id);
+    perEch[id] = { id, nume: e ? e.nume : '—', culoare: e?.culoare || '#9ca3af', codMembri: e?.codMembri || [], apartamente: new Set(), zile: 0, zileSet: new Set(), eur: 0, metri: 0 };
+  }
+
+  // 1. Alocările din rapoarte (auto)
+  state.rapoarte.forEach(r => {
+    r.alocari.forEach(a => {
+      // Echipa din alocare
+      if (a.echipaId) {
+        initEch(a.echipaId);
+        perEch[a.echipaId].apartamente.add(a.ap);
+        perEch[a.echipaId].zileSet.add(r.data);
+        Object.entries(a.materiale || {}).forEach(([k, v]) => {
+          if (esteMaterialFacturabil(k)) {
+            const m = state.materiale.find(x => x.id === k);
+            perEch[a.echipaId].eur += v * (m?.pretEur || 0);
+            perEch[a.echipaId].metri += v;
+          }
+        });
+        // Membrii echipei → moștenesc activitatea
+        const e = state.echipe.find(x => x.id === a.echipaId);
+        if (e) {
+          e.codMembri.forEach(cm => {
+            initMunc(cm);
+            perMunc[cm].apartamente.add(a.ap);
+            perMunc[cm].zileSet.add(r.data);
+            // Distribuim valoarea uniform pe membri
+            const cota = e.codMembri.length || 1;
+            Object.entries(a.materiale || {}).forEach(([k, v]) => {
+              if (esteMaterialFacturabil(k)) {
+                const m = state.materiale.find(x => x.id === k);
+                perMunc[cm].eurAprox += (v * (m?.pretEur || 0)) / cota;
+              }
+            });
+          });
+        }
+      }
+    });
+  });
+
+  // 2. Adăugirile manuale per apartament
+  state.apartamente.forEach(ap => {
+    // Muncitori manuali
+    (ap.muncitoriManuali || []).forEach(mm => {
+      initMunc(mm.cod);
+      perMunc[mm.cod].apartamente.add(ap.cod);
+      perMunc[mm.cod].zile += (mm.zile || 0);
+      perMunc[mm.cod].ore += (mm.ore || 0);
+    });
+    // Echipe manuale
+    (ap.echipeManuale || []).forEach(em => {
+      initEch(em.echipaId);
+      perEch[em.echipaId].apartamente.add(ap.cod);
+      perEch[em.echipaId].zile += (em.zile || 0);
+      // Membrii echipei → moștenesc zilele
+      const e = state.echipe.find(x => x.id === em.echipaId);
+      if (e) {
+        e.codMembri.forEach(cm => {
+          initMunc(cm);
+          perMunc[cm].apartamente.add(ap.cod);
+          perMunc[cm].zile += (em.zile || 0);
+        });
+      }
+    });
+  });
+
+  // 3. Adaug zilele din zileSet (auto) ca să avem total
+  Object.values(perMunc).forEach(m => { m.zileAuto = m.zileSet.size; m.zileTotal = m.zileAuto + m.zile; });
+  Object.values(perEch).forEach(e => { e.zileAuto = e.zileSet.size; e.zileTotal = e.zileAuto + e.zile; });
+
+  // 4. Adaug orele din pontaj (real)
+  state.prezenta.forEach(p => {
+    if (p.absent) return;
+    if (!perMunc[p.cod]) return; // doar pentru muncitori care apar și în alte locuri
+    perMunc[p.cod].ore += (p.ore || 0);
+  });
+
+  return {
+    muncitori: Object.values(perMunc).sort((a, b) => b.eurAprox - a.eurAprox || b.zileTotal - a.zileTotal),
+    echipe: Object.values(perEch).sort((a, b) => b.eur - a.eur || b.zileTotal - a.zileTotal),
+  };
+}
+
+function renderClasament() {
+  const c = calculeazaClasamente();
+  const medals = ['🥇', '🥈', '🥉'];
+
+  const contM = document.getElementById('clasamentMuncitori');
+  if (contM) {
+    if (c.muncitori.length === 0) {
+      contM.innerHTML = '<div class="empty">Niciun muncitor cu activitate</div>';
+    } else {
+      let html = '<h4 style="color:#1e40af;margin:8px 0 6px;font-size:13px">🏆 Top muncitori</h4>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
+      html += '<th style="text-align:left;padding:5px;background:#1e40af;color:white">#</th>';
+      html += '<th style="text-align:left;padding:5px;background:#1e40af;color:white">Cod</th>';
+      html += '<th style="text-align:left;padding:5px;background:#1e40af;color:white">Nume</th>';
+      html += '<th style="text-align:center;padding:5px;background:#1e40af;color:white">Ap.</th>';
+      html += '<th style="text-align:right;padding:5px;background:#1e40af;color:white">Zile (auto/man)</th>';
+      html += '<th style="text-align:right;padding:5px;background:#1e40af;color:white">Ore</th>';
+      html += '<th style="text-align:right;padding:5px;background:#1e40af;color:white">EUR (aprox)</th>';
+      html += '</tr></thead><tbody>';
+      c.muncitori.forEach((m, i) => {
+        const medal = medals[i] || `${i + 1}`;
+        html += `<tr style="border-bottom:1px solid #f3f4f6">
+          <td style="padding:5px;font-size:14px">${medal}</td>
+          <td style="padding:5px"><b>${m.cod}</b></td>
+          <td style="padding:5px">${m.nume}</td>
+          <td style="padding:5px;text-align:center">${m.apartamente.size}</td>
+          <td style="padding:5px;text-align:right">${m.zileTotal} <span style="color:#9ca3af;font-size:10px">(${m.zileAuto}+${m.zile})</span></td>
+          <td style="padding:5px;text-align:right">${m.ore.toFixed(1)}h</td>
+          <td style="padding:5px;text-align:right;color:#10b981;font-weight:600">${m.eurAprox.toFixed(2)} €</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      contM.innerHTML = html;
+    }
+  }
+
+  const contE = document.getElementById('clasamentEchipe');
+  if (contE) {
+    if (c.echipe.length === 0) {
+      contE.innerHTML = '<div class="empty">Nicio echipă cu activitate</div>';
+    } else {
+      let html = '<h4 style="color:#10b981;margin:14px 0 6px;font-size:13px">🏗️ Top echipe</h4>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
+      html += '<th style="text-align:left;padding:5px;background:#10b981;color:white">#</th>';
+      html += '<th style="text-align:left;padding:5px;background:#10b981;color:white">Echipă</th>';
+      html += '<th style="text-align:center;padding:5px;background:#10b981;color:white">Ap.</th>';
+      html += '<th style="text-align:right;padding:5px;background:#10b981;color:white">Zile (auto/man)</th>';
+      html += '<th style="text-align:right;padding:5px;background:#10b981;color:white">Metri</th>';
+      html += '<th style="text-align:right;padding:5px;background:#10b981;color:white">EUR</th>';
+      html += '<th style="text-align:right;padding:5px;background:#10b981;color:white">EUR/zi</th>';
+      html += '</tr></thead><tbody>';
+      c.echipe.forEach((e, i) => {
+        const medal = medals[i] || `${i + 1}`;
+        const eurPerZi = e.zileTotal ? e.eur / e.zileTotal : 0;
+        html += `<tr style="border-bottom:1px solid #f3f4f6">
+          <td style="padding:5px;font-size:14px">${medal}</td>
+          <td style="padding:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${e.culoare};margin-right:4px"></span><b>${e.nume}</b> <span style="font-size:10px;color:#6b7280">(${e.codMembri.join(', ')})</span></td>
+          <td style="padding:5px;text-align:center">${e.apartamente.size}</td>
+          <td style="padding:5px;text-align:right">${e.zileTotal} <span style="color:#9ca3af;font-size:10px">(${e.zileAuto}+${e.zile})</span></td>
+          <td style="padding:5px;text-align:right">${Math.round(e.metri)}</td>
+          <td style="padding:5px;text-align:right;color:#10b981;font-weight:700">${e.eur.toFixed(2)} €</td>
+          <td style="padding:5px;text-align:right;font-weight:600">${eurPerZi.toFixed(2)} €</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      contE.innerHTML = html;
+    }
+  }
+}
+
+function genereazaClasamentPDF() {
+  const c = calculeazaClasamente();
+  if (c.muncitori.length === 0 && c.echipe.length === 0) { toast('Nicio activitate'); return; }
+  const medals = ['🥇', '🥈', '🥉'];
+
+  let muncRows = c.muncitori.map((m, i) => {
+    const medal = medals[i] || `${i + 1}`;
+    return `<tr><td style="text-align:center">${medal}</td><td><b>${m.cod}</b></td><td>${m.nume}</td><td style="text-align:center">${m.apartamente.size}</td><td style="text-align:right">${m.zileTotal} (${m.zileAuto}+${m.zile})</td><td style="text-align:right">${m.ore.toFixed(1)}h</td><td style="text-align:right;color:#10b981;font-weight:700">${m.eurAprox.toFixed(2)} €</td></tr>`;
+  }).join('');
+
+  let echRows = c.echipe.map((e, i) => {
+    const medal = medals[i] || `${i + 1}`;
+    const eurPerZi = e.zileTotal ? e.eur / e.zileTotal : 0;
+    return `<tr><td style="text-align:center">${medal}</td><td><b style="color:${e.culoare}">${e.nume}</b> (${e.codMembri.join(', ')})</td><td style="text-align:center">${e.apartamente.size}</td><td style="text-align:right">${e.zileTotal} (${e.zileAuto}+${e.zile})</td><td style="text-align:right">${Math.round(e.metri)}</td><td style="text-align:right;color:#10b981;font-weight:700">${e.eur.toFixed(2)} €</td><td style="text-align:right">${eurPerZi.toFixed(2)} €</td></tr>`;
+  }).join('');
+
+  const antet = `<div style="font-size:11px;line-height:1.5;color:#374151">
+    <div style="font-weight:700;font-size:13px;color:#1e40af">${state.firmaNume || 'iFort Systems SRL'}</div>
+    <div>${state.firmaAdresa || ''}</div>
+    <div><b>CUI:</b> ${state.firmaCUI || ''} &nbsp; <b>ONRC:</b> ${state.firmaONRC || ''}</div>
+  </div>`;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="format-detection" content="telephone=no, date=no, address=no, email=no"><title>Clasament</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;background:#e5e7eb}
+a,a:link,a:visited{color:inherit !important;text-decoration:none !important;cursor:default}
+.page{background:white;padding:25px;max-width:900px;margin:15px auto;box-shadow:0 1px 4px rgba(0,0,0,0.1)}
+.header{display:flex;align-items:flex-start;gap:18px;border-bottom:3px solid #f59e0b;padding-bottom:10px;margin-bottom:14px}
+.header .logo{width:65px}
+.intern-badge{background:#fef3c7;color:#92400e;padding:5px 12px;border-radius:6px;font-weight:600;font-size:11px;text-align:center;margin-bottom:8px;display:inline-block}
+.title{font-size:18px;font-weight:700;text-align:center;margin:6px 0;color:#f59e0b}
+.subtitle{font-size:11px;color:#6b7280;text-align:center;margin-bottom:14px}
+h2{font-size:14px;color:#1e40af;margin-top:18px;margin-bottom:6px;border-bottom:1px solid #e5e7eb;padding-bottom:3px}
+table{width:100%;border-collapse:collapse;margin:6px 0 12px}
+th,td{padding:6px 8px;border:1px solid #e5e7eb;font-size:11px}
+th{background:#1e40af;color:white;text-align:left;font-weight:600}
+.footer{margin-top:18px;padding-top:8px;border-top:1px solid #e5e7eb;font-size:10px;color:#9ca3af;text-align:center}
+.no-print{position:fixed;top:10px;right:10px;padding:10px 18px;background:#f59e0b;color:white;border:none;border-radius:6px;cursor:pointer;z-index:100}
+@media print{@page{size:A4 portrait;margin:8mm}body{background:white}.page{margin:0;padding:5mm;box-shadow:none}.no-print{display:none}tr{page-break-inside:avoid}thead{display:table-header-group}}
+</style></head><body>
+<button class="no-print" onclick="window.print()">🖨️ Tipărește / Salvează PDF</button>
+<div class="page">
+  <div class="intern-badge">🏆 CLASAMENT — Document intern</div>
+  <div class="header"><img src="logo.png" class="logo" />${antet}</div>
+  <div class="title">CLASAMENT MUNCITORI + ECHIPE</div>
+  <div class="subtitle">Generat ${fmtDate(todayISO())} • Șantier: ${state.santier || 'Corallis'}</div>
+
+  <h2>👷 Top muncitori</h2>
+  <table>
+    <thead><tr><th style="width:40px;text-align:center">Loc</th><th>Cod</th><th>Nume</th><th style="text-align:center">Ap.</th><th style="text-align:right">Zile (auto+manual)</th><th style="text-align:right">Ore</th><th style="text-align:right">EUR aprox</th></tr></thead>
+    <tbody>${muncRows || '<tr><td colspan="7" style="text-align:center;color:#9ca3af">Nimic</td></tr>'}</tbody>
+  </table>
+
+  <h2>🏗️ Top echipe</h2>
+  <table>
+    <thead><tr><th style="width:40px;text-align:center">Loc</th><th>Echipă</th><th style="text-align:center">Ap.</th><th style="text-align:right">Zile (auto+manual)</th><th style="text-align:right">Metri</th><th style="text-align:right">EUR</th><th style="text-align:right">EUR/zi</th></tr></thead>
+    <tbody>${echRows || '<tr><td colspan="7" style="text-align:center;color:#9ca3af">Nimic</td></tr>'}</tbody>
+  </table>
+
+  <p style="font-size:10px;color:#6b7280">EUR/muncitor = distribuit uniform pe membrii echipei. Zile = câte zile efectiv (auto din rapoarte + manuale din editarea apartamentelor).</p>
+  <div class="footer">Document intern — ${state.firmaNume || 'iFort Systems SRL'} — ${fmtDate(todayISO())}</div>
+</div>
+</body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(html); w.document.close();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const bR = document.getElementById('btnRefreshClasament');
+  const bP = document.getElementById('btnClasamentPDF');
+  if (bR) bR.addEventListener('click', renderClasament);
+  if (bP) bP.addEventListener('click', genereazaClasamentPDF);
 });
 
 function init() {
