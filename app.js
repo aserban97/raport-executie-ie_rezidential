@@ -103,6 +103,18 @@ function load() {
       m.nume = 'Cablu ' + m.nume + (needsSuffix ? ' mmp' : '');
     }
   });
+
+  // Migrare snapshot membri echipă pentru rapoartele vechi (varianta A: din echipa actuală)
+  (state.rapoarte || []).forEach(r => {
+    (r.alocari || []).forEach(a => {
+      if (a.echipaId && !a.membriEchipa) {
+        const ech = (state.echipe || []).find(e => e.id === a.echipaId);
+        if (ech) a.membriEchipa = [...(ech.codMembri || [])];
+        else a.membriEchipa = [];
+      }
+    });
+  });
+
   save();
 }
 function save() {
@@ -336,7 +348,13 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
       const v = parseFloat(inp.value);
       if (v > 0) materialeAp[inp.dataset.mat] = v;
     });
-    if (ap) alocari.push({ ap, oameni, stareNoua, echipaId, materiale: materialeAp });
+    // Snapshot membri echipă (pentru tracking istoric, chiar dacă schimbi echipa ulterior)
+    let membriEchipa = [];
+    if (echipaId) {
+      const ech = state.echipe.find(e => e.id === echipaId);
+      if (ech) membriEchipa = [...(ech.codMembri || [])];
+    }
+    if (ap) alocari.push({ ap, oameni, stareNoua, echipaId, membriEchipa, materiale: materialeAp });
   });
 
   if (alocari.length === 0) { toast('Completează apartamentul / zona la cel puțin un rând'); return; }
@@ -6631,98 +6649,165 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ============= CLASAMENT MUNCITORI + ECHIPE =============
+// Materialele care contează ca "metri instalați" pentru clasament producție
+// (tub + cabluri + jgheab — adică muncă efectivă pe metru, fără accesorii)
+function esteMaterialMetri(id) {
+  if (id === 'tub20' || id === 'copex20') return true;
+  if (id.startsWith('cyyf') || id.startsWith('cablu_')) return true;
+  if (id.startsWith('jgheab')) return true;
+  return false;
+}
+
 function calculeazaClasamente() {
-  // Per muncitor: nr apartamente atinse, zile total (auto + manual), ore total, valoare EUR aproximată
+  // Per muncitor: zile lucrate, m instalați (cota), apartamente, finalizate, scor producție
   const perMunc = {};
   const perEch = {};
 
   function initMunc(cod) {
     if (perMunc[cod]) return;
     const m = state.muncitori.find(x => x.cod === cod);
-    perMunc[cod] = { cod, nume: m ? m.nume : '—', apartamente: new Set(), zile: 0, zileSet: new Set(), ore: 0, eurAprox: 0 };
+    perMunc[cod] = {
+      cod, nume: m ? m.nume : '—',
+      apartamente: new Set(), zileSet: new Set(),
+      zileMan: 0, ore: 0, eurAprox: 0, metri: 0,
+      apFinalizate: new Set(),
+      echipe: new Set(),
+    };
   }
   function initEch(id) {
     if (perEch[id]) return;
     const e = state.echipe.find(x => x.id === id);
-    perEch[id] = { id, nume: e ? e.nume : '—', culoare: e?.culoare || '#9ca3af', codMembri: e?.codMembri || [], apartamente: new Set(), zile: 0, zileSet: new Set(), eur: 0, metri: 0 };
+    perEch[id] = {
+      id, nume: e ? e.nume : '—',
+      culoare: e?.culoare || '#9ca3af',
+      codMembri: e?.codMembri || [],
+      apartamente: new Set(), zileSet: new Set(),
+      zileMan: 0, eur: 0, metri: 0,
+      apFinalizate: new Set(),
+    };
   }
 
-  // 1. Alocările din rapoarte (auto)
+  // Map cod apartament → stare (pt finalizate)
+  const stareAp = {};
+  state.apartamente.forEach(ap => { stareAp[ap.cod] = ap.stare; });
+
+  // 1. Alocările din rapoarte zilnice (auto + snapshot membri)
   state.rapoarte.forEach(r => {
     r.alocari.forEach(a => {
-      // Echipa din alocare
-      if (a.echipaId) {
-        initEch(a.echipaId);
-        perEch[a.echipaId].apartamente.add(a.ap);
-        perEch[a.echipaId].zileSet.add(r.data);
-        Object.entries(a.materiale || {}).forEach(([k, v]) => {
-          if (esteMaterialFacturabil(k)) {
-            const m = state.materiale.find(x => x.id === k);
-            perEch[a.echipaId].eur += v * (m?.pretEur || 0);
-            perEch[a.echipaId].metri += v;
-          }
-        });
-        // Membrii echipei → moștenesc activitatea
-        const e = state.echipe.find(x => x.id === a.echipaId);
-        if (e) {
-          e.codMembri.forEach(cm => {
-            initMunc(cm);
-            perMunc[cm].apartamente.add(a.ap);
-            perMunc[cm].zileSet.add(r.data);
-            // Distribuim valoarea uniform pe membri
-            const cota = e.codMembri.length || 1;
-            Object.entries(a.materiale || {}).forEach(([k, v]) => {
-              if (esteMaterialFacturabil(k)) {
-                const m = state.materiale.find(x => x.id === k);
-                perMunc[cm].eurAprox += (v * (m?.pretEur || 0)) / cota;
-              }
-            });
-          });
-        }
-      }
+      if (!a.echipaId) return;
+      initEch(a.echipaId);
+      perEch[a.echipaId].apartamente.add(a.ap);
+      perEch[a.echipaId].zileSet.add(r.data);
+      if (stareAp[a.ap] === 'gata') perEch[a.echipaId].apFinalizate.add(a.ap);
+
+      let metriAloc = 0, eurAloc = 0;
+      Object.entries(a.materiale || {}).forEach(([k, v]) => {
+        const m = state.materiale.find(x => x.id === k);
+        if (esteMaterialMetri(k)) metriAloc += v;
+        if (esteMaterialFacturabil(k)) eurAloc += v * (m?.pretEur || 0);
+      });
+      perEch[a.echipaId].metri += metriAloc;
+      perEch[a.echipaId].eur += eurAloc;
+
+      // SNAPSHOT: folosesc membriEchipa din alocare (corect istoric), nu echipa curentă
+      const membri = (a.membriEchipa && a.membriEchipa.length)
+        ? a.membriEchipa
+        : (state.echipe.find(x => x.id === a.echipaId)?.codMembri || []);
+      const cota = membri.length || 1;
+      membri.forEach(cm => {
+        initMunc(cm);
+        perMunc[cm].apartamente.add(a.ap);
+        perMunc[cm].zileSet.add(r.data);
+        perMunc[cm].metri += metriAloc / cota;
+        perMunc[cm].eurAprox += eurAloc / cota;
+        perMunc[cm].echipe.add(a.echipaId);
+        if (stareAp[a.ap] === 'gata') perMunc[cm].apFinalizate.add(a.ap);
+      });
     });
   });
 
-  // 2. Adăugirile manuale per apartament
+  // 2. Adăugirile manuale per apartament (pt apartamentele vechi fără echipaId)
   state.apartamente.forEach(ap => {
-    // Muncitori manuali
+    // Calculez metri totali instalați în acest apartament (din toate rapoartele)
+    let metriAp = 0, eurAp = 0;
+    state.rapoarte.forEach(r => {
+      r.alocari.forEach(a => {
+        if (a.ap !== ap.cod) return;
+        Object.entries(a.materiale || {}).forEach(([k, v]) => {
+          const m = state.materiale.find(x => x.id === k);
+          if (esteMaterialMetri(k)) metriAp += v;
+          if (esteMaterialFacturabil(k)) eurAp += v * (m?.pretEur || 0);
+        });
+      });
+    });
+
+    // Muncitori manuali → distribui metri proporțional cu zilele
+    const totalZileMan = (ap.muncitoriManuali || []).reduce((s, mm) => s + (mm.zile || 0), 0);
     (ap.muncitoriManuali || []).forEach(mm => {
       initMunc(mm.cod);
       perMunc[mm.cod].apartamente.add(ap.cod);
-      perMunc[mm.cod].zile += (mm.zile || 0);
+      perMunc[mm.cod].zileMan += (mm.zile || 0);
       perMunc[mm.cod].ore += (mm.ore || 0);
+      if (ap.stare === 'gata') perMunc[mm.cod].apFinalizate.add(ap.cod);
+      // Distribui metri/eur proporțional cu zilele
+      if (totalZileMan > 0) {
+        const pondere = (mm.zile || 0) / totalZileMan;
+        perMunc[mm.cod].metri += metriAp * pondere;
+        perMunc[mm.cod].eurAprox += eurAp * pondere;
+      }
     });
     // Echipe manuale
     (ap.echipeManuale || []).forEach(em => {
       initEch(em.echipaId);
       perEch[em.echipaId].apartamente.add(ap.cod);
-      perEch[em.echipaId].zile += (em.zile || 0);
-      // Membrii echipei → moștenesc zilele
+      perEch[em.echipaId].zileMan += (em.zile || 0);
+      if (ap.stare === 'gata') perEch[em.echipaId].apFinalizate.add(ap.cod);
       const e = state.echipe.find(x => x.id === em.echipaId);
       if (e) {
         e.codMembri.forEach(cm => {
           initMunc(cm);
           perMunc[cm].apartamente.add(ap.cod);
-          perMunc[cm].zile += (em.zile || 0);
+          perMunc[cm].zileMan += (em.zile || 0);
+          perMunc[cm].echipe.add(em.echipaId);
+          if (ap.stare === 'gata') perMunc[cm].apFinalizate.add(ap.cod);
         });
       }
     });
   });
 
-  // 3. Adaug zilele din zileSet (auto) ca să avem total
-  Object.values(perMunc).forEach(m => { m.zileAuto = m.zileSet.size; m.zileTotal = m.zileAuto + m.zile; });
-  Object.values(perEch).forEach(e => { e.zileAuto = e.zileSet.size; e.zileTotal = e.zileAuto + e.zile; });
+  // 3. Calcul total + scor producție
+  // Formulă: Scor = √(zile) × m/zi / 10 + finalizate × 15
+  Object.values(perMunc).forEach(m => {
+    m.zileAuto = m.zileSet.size;
+    m.zileTotal = m.zileAuto + m.zileMan;
+    m.nrFinalizate = m.apFinalizate.size;
+    m.metri = Math.round(m.metri);
+    m.metriPeZi = m.zileTotal > 0 ? m.metri / m.zileTotal : 0;
+    m.scor = Math.sqrt(m.zileTotal) * m.metriPeZi / 10 + m.nrFinalizate * 15;
+    m.isNou = m.zileTotal < 5;
+  });
+  Object.values(perEch).forEach(e => {
+    e.zileAuto = e.zileSet.size;
+    e.zileTotal = e.zileAuto + e.zileMan;
+    e.nrFinalizate = e.apFinalizate.size;
+    e.metri = Math.round(e.metri);
+    e.metriPeZi = e.zileTotal > 0 ? e.metri / e.zileTotal : 0;
+    e.scor = Math.sqrt(e.zileTotal) * e.metriPeZi / 10 + e.nrFinalizate * 15;
+  });
 
-  // 4. Adaug orele din pontaj (real)
+  // 4. Ore din pontaj
   state.prezenta.forEach(p => {
     if (p.absent) return;
-    if (!perMunc[p.cod]) return; // doar pentru muncitori care apar și în alte locuri
+    if (!perMunc[p.cod]) return;
     perMunc[p.cod].ore += (p.ore || 0);
   });
 
+  const muncTot = Object.values(perMunc);
   return {
-    muncitori: Object.values(perMunc).sort((a, b) => b.eurAprox - a.eurAprox || b.zileTotal - a.zileTotal),
-    echipe: Object.values(perEch).sort((a, b) => b.eur - a.eur || b.zileTotal - a.zileTotal),
+    veterani: muncTot.filter(m => !m.isNou).sort((a, b) => b.scor - a.scor),
+    nouVeniti: muncTot.filter(m => m.isNou).sort((a, b) => b.metriPeZi - a.metriPeZi),
+    muncitori: muncTot.sort((a, b) => b.scor - a.scor),
+    echipe: Object.values(perEch).sort((a, b) => b.scor - a.scor),
   };
 }
 
@@ -6735,29 +6820,65 @@ function renderClasament() {
     if (c.muncitori.length === 0) {
       contM.innerHTML = '<div class="empty">Niciun muncitor cu activitate</div>';
     } else {
-      let html = '<h4 style="color:#1e40af;margin:8px 0 6px;font-size:13px">🏆 Top muncitori</h4>';
-      html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
-      html += '<th style="text-align:left;padding:5px;background:#1e40af;color:white">#</th>';
-      html += '<th style="text-align:left;padding:5px;background:#1e40af;color:white">Cod</th>';
-      html += '<th style="text-align:left;padding:5px;background:#1e40af;color:white">Nume</th>';
-      html += '<th style="text-align:center;padding:5px;background:#1e40af;color:white">Ap.</th>';
-      html += '<th style="text-align:right;padding:5px;background:#1e40af;color:white">Zile (auto/man)</th>';
-      html += '<th style="text-align:right;padding:5px;background:#1e40af;color:white">Ore</th>';
-      html += '<th style="text-align:right;padding:5px;background:#1e40af;color:white">EUR (aprox)</th>';
-      html += '</tr></thead><tbody>';
-      c.muncitori.forEach((m, i) => {
-        const medal = medals[i] || `${i + 1}`;
-        html += `<tr style="border-bottom:1px solid #f3f4f6">
-          <td style="padding:5px;font-size:14px">${medal}</td>
-          <td style="padding:5px"><b>${m.cod}</b></td>
-          <td style="padding:5px">${m.nume}</td>
-          <td style="padding:5px;text-align:center">${m.apartamente.size}</td>
-          <td style="padding:5px;text-align:right">${m.zileTotal} <span style="color:#9ca3af;font-size:10px">(${m.zileAuto}+${m.zile})</span></td>
-          <td style="padding:5px;text-align:right">${m.ore.toFixed(1)}h</td>
-          <td style="padding:5px;text-align:right;color:#10b981;font-weight:600">${m.eurAprox.toFixed(2)} €</td>
-        </tr>`;
-      });
-      html += '</tbody></table>';
+      let html = '';
+
+      // VETERANI (≥ 5 zile)
+      html += '<h4 style="color:#1e40af;margin:8px 0 6px;font-size:13px">🏆 Veterani (≥ 5 zile lucrate) — sortați pe scor producție</h4>';
+      if (c.veterani.length === 0) {
+        html += '<p class="small" style="color:#9ca3af">Niciun veteran momentan</p>';
+      } else {
+        html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:600px"><thead><tr>';
+        ['#', 'Cod', 'Nume', 'Zile', 'm/zi', 'Total m', '✓', 'Scor'].forEach((h, i) => {
+          const align = i <= 2 ? 'left' : (i === 7 ? 'right' : 'center');
+          html += `<th style="text-align:${align};padding:5px;background:#1e40af;color:white">${h}</th>`;
+        });
+        html += '</tr></thead><tbody>';
+        c.veterani.forEach((m, i) => {
+          const medal = medals[i] || `${i + 1}`;
+          html += `<tr style="border-bottom:1px solid #f3f4f6">
+            <td style="padding:5px;font-size:14px">${medal}</td>
+            <td style="padding:5px"><b>${m.cod}</b></td>
+            <td style="padding:5px">${m.nume}</td>
+            <td style="padding:5px;text-align:center">${m.zileTotal} <span style="color:#9ca3af;font-size:9px">(${m.zileAuto}+${m.zileMan})</span></td>
+            <td style="padding:5px;text-align:center;color:#1e40af;font-weight:600">${Math.round(m.metriPeZi)}</td>
+            <td style="padding:5px;text-align:center">${m.metri}</td>
+            <td style="padding:5px;text-align:center;color:#10b981;font-weight:600">${m.nrFinalizate}</td>
+            <td style="padding:5px;text-align:right;color:#dc2626;font-weight:700;font-size:13px">${m.scor.toFixed(0)}</td>
+          </tr>`;
+        });
+        html += '</tbody></table></div>';
+      }
+
+      // NOU-VENIȚI (< 5 zile)
+      if (c.nouVeniti.length > 0) {
+        html += '<h4 style="color:#92400e;margin:18px 0 6px;font-size:13px">🆕 Nou-veniți (sub 5 zile) — sortați pe metri/zi</h4>';
+        html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:550px"><thead><tr>';
+        ['#', 'Cod', 'Nume', 'Zile', 'm/zi', 'Total m', 'Status'].forEach((h, i) => {
+          const align = i <= 2 ? 'left' : (i === 6 ? 'right' : 'center');
+          html += `<th style="text-align:${align};padding:5px;background:#f59e0b;color:white">${h}</th>`;
+        });
+        html += '</tr></thead><tbody>';
+        c.nouVeniti.forEach((m, i) => {
+          html += `<tr style="border-bottom:1px solid #f3f4f6;background:#fef3c7">
+            <td style="padding:5px">${i + 1}</td>
+            <td style="padding:5px"><b>${m.cod}</b></td>
+            <td style="padding:5px">${m.nume}</td>
+            <td style="padding:5px;text-align:center">${m.zileTotal}</td>
+            <td style="padding:5px;text-align:center;color:#92400e;font-weight:600">${Math.round(m.metriPeZi)}</td>
+            <td style="padding:5px;text-align:center">${m.metri}</td>
+            <td style="padding:5px;text-align:right;font-size:10px;color:#92400e">🆕 ${m.zileTotal} ${m.zileTotal === 1 ? 'zi' : 'zile'}</td>
+          </tr>`;
+        });
+        html += '</tbody></table></div>';
+      }
+
+      // LEGENDĂ
+      html += `<p class="small" style="margin-top:10px;color:#6b7280;font-size:10px">
+        <b>Scor:</b> √zile × (m/zi) ÷ 10 + finalizate × 15 &nbsp;•&nbsp;
+        <b>m/zi:</b> producție medie zilnică (tub + cabluri + jgheab) &nbsp;•&nbsp;
+        <b>✓:</b> nr. apartamente finalizate la care a contribuit
+      </p>`;
+
       contM.innerHTML = html;
     }
   }
@@ -6767,30 +6888,34 @@ function renderClasament() {
     if (c.echipe.length === 0) {
       contE.innerHTML = '<div class="empty">Nicio echipă cu activitate</div>';
     } else {
-      let html = '<h4 style="color:#10b981;margin:14px 0 6px;font-size:13px">🏗️ Top echipe</h4>';
-      html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
-      html += '<th style="text-align:left;padding:5px;background:#10b981;color:white">#</th>';
-      html += '<th style="text-align:left;padding:5px;background:#10b981;color:white">Echipă</th>';
-      html += '<th style="text-align:center;padding:5px;background:#10b981;color:white">Ap.</th>';
-      html += '<th style="text-align:right;padding:5px;background:#10b981;color:white">Zile (auto/man)</th>';
-      html += '<th style="text-align:right;padding:5px;background:#10b981;color:white">Metri</th>';
-      html += '<th style="text-align:right;padding:5px;background:#10b981;color:white">EUR</th>';
-      html += '<th style="text-align:right;padding:5px;background:#10b981;color:white">EUR/zi</th>';
+      let html = '<h4 style="color:#10b981;margin:14px 0 6px;font-size:13px">🏗️ Top echipe — sortate pe scor producție</h4>';
+      html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:650px"><thead><tr>';
+      ['#', 'Echipă', 'Zile', 'm/zi', 'Total m', '✓', 'EUR', 'Scor'].forEach((h, i) => {
+        const align = i <= 1 ? 'left' : (i === 7 ? 'right' : 'center');
+        html += `<th style="text-align:${align};padding:5px;background:#10b981;color:white">${h}</th>`;
+      });
       html += '</tr></thead><tbody>';
       c.echipe.forEach((e, i) => {
         const medal = medals[i] || `${i + 1}`;
-        const eurPerZi = e.zileTotal ? e.eur / e.zileTotal : 0;
+        const membriNume = (e.codMembri || []).map(c => {
+          const mm = state.muncitori.find(x => x.cod === c);
+          return mm ? mm.nume.split(' ')[0] : c;
+        }).join(', ');
         html += `<tr style="border-bottom:1px solid #f3f4f6">
           <td style="padding:5px;font-size:14px">${medal}</td>
-          <td style="padding:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${e.culoare};margin-right:4px"></span><b>${e.nume}</b> <span style="font-size:10px;color:#6b7280">(${e.codMembri.join(', ')})</span></td>
-          <td style="padding:5px;text-align:center">${e.apartamente.size}</td>
-          <td style="padding:5px;text-align:right">${e.zileTotal} <span style="color:#9ca3af;font-size:10px">(${e.zileAuto}+${e.zile})</span></td>
-          <td style="padding:5px;text-align:right">${Math.round(e.metri)}</td>
-          <td style="padding:5px;text-align:right;color:#10b981;font-weight:700">${e.eur.toFixed(2)} €</td>
-          <td style="padding:5px;text-align:right;font-weight:600">${eurPerZi.toFixed(2)} €</td>
+          <td style="padding:5px">
+            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${e.culoare};margin-right:4px"></span><b>${e.nume}</b>
+            <div style="font-size:9px;color:#6b7280">${membriNume}</div>
+          </td>
+          <td style="padding:5px;text-align:center">${e.zileTotal}</td>
+          <td style="padding:5px;text-align:center;color:#10b981;font-weight:600">${Math.round(e.metriPeZi)}</td>
+          <td style="padding:5px;text-align:center">${e.metri}</td>
+          <td style="padding:5px;text-align:center;color:#10b981;font-weight:600">${e.nrFinalizate}</td>
+          <td style="padding:5px;text-align:center;color:#10b981;font-size:10px">${e.eur.toFixed(0)} €</td>
+          <td style="padding:5px;text-align:right;color:#dc2626;font-weight:700;font-size:13px">${e.scor.toFixed(0)}</td>
         </tr>`;
       });
-      html += '</tbody></table>';
+      html += '</tbody></table></div>';
       contE.innerHTML = html;
     }
   }
@@ -6801,15 +6926,20 @@ function genereazaClasamentPDF() {
   if (c.muncitori.length === 0 && c.echipe.length === 0) { toast('Nicio activitate'); return; }
   const medals = ['🥇', '🥈', '🥉'];
 
-  let muncRows = c.muncitori.map((m, i) => {
+  let vetRows = c.veterani.map((m, i) => {
     const medal = medals[i] || `${i + 1}`;
-    return `<tr><td style="text-align:center">${medal}</td><td><b>${m.cod}</b></td><td>${m.nume}</td><td style="text-align:center">${m.apartamente.size}</td><td style="text-align:right">${m.zileTotal} (${m.zileAuto}+${m.zile})</td><td style="text-align:right">${m.ore.toFixed(1)}h</td><td style="text-align:right;color:#10b981;font-weight:700">${m.eurAprox.toFixed(2)} €</td></tr>`;
+    return `<tr><td style="text-align:center">${medal}</td><td><b>${m.cod}</b></td><td>${m.nume}</td><td style="text-align:center">${m.zileTotal} (${m.zileAuto}+${m.zileMan})</td><td style="text-align:center;color:#1e40af;font-weight:700">${Math.round(m.metriPeZi)}</td><td style="text-align:center">${m.metri}</td><td style="text-align:center;color:#10b981;font-weight:700">${m.nrFinalizate}</td><td style="text-align:right;color:#dc2626;font-weight:700">${m.scor.toFixed(0)}</td></tr>`;
   }).join('');
-
+  let nouRows = c.nouVeniti.map((m, i) => {
+    return `<tr><td style="text-align:center">${i + 1}</td><td><b>${m.cod}</b></td><td>${m.nume}</td><td style="text-align:center">${m.zileTotal}</td><td style="text-align:center;color:#92400e;font-weight:700">${Math.round(m.metriPeZi)}</td><td style="text-align:center">${m.metri}</td><td style="text-align:right;font-size:10px">🆕 ${m.zileTotal} ${m.zileTotal === 1 ? 'zi' : 'zile'}</td></tr>`;
+  }).join('');
   let echRows = c.echipe.map((e, i) => {
     const medal = medals[i] || `${i + 1}`;
-    const eurPerZi = e.zileTotal ? e.eur / e.zileTotal : 0;
-    return `<tr><td style="text-align:center">${medal}</td><td><b style="color:${e.culoare}">${e.nume}</b> (${e.codMembri.join(', ')})</td><td style="text-align:center">${e.apartamente.size}</td><td style="text-align:right">${e.zileTotal} (${e.zileAuto}+${e.zile})</td><td style="text-align:right">${Math.round(e.metri)}</td><td style="text-align:right;color:#10b981;font-weight:700">${e.eur.toFixed(2)} €</td><td style="text-align:right">${eurPerZi.toFixed(2)} €</td></tr>`;
+    const membriNume = (e.codMembri || []).map(c => {
+      const mm = state.muncitori.find(x => x.cod === c);
+      return mm ? mm.nume.split(' ')[0] : c;
+    }).join(', ');
+    return `<tr><td style="text-align:center">${medal}</td><td><b style="color:${e.culoare}">${e.nume}</b><br><span style="font-size:9px;color:#6b7280">${membriNume}</span></td><td style="text-align:center">${e.zileTotal} (${e.zileAuto}+${e.zileMan})</td><td style="text-align:center;color:#10b981;font-weight:700">${Math.round(e.metriPeZi)}</td><td style="text-align:center">${e.metri}</td><td style="text-align:center;color:#10b981;font-weight:700">${e.nrFinalizate}</td><td style="text-align:center">${e.eur.toFixed(0)} €</td><td style="text-align:right;color:#dc2626;font-weight:700">${e.scor.toFixed(0)}</td></tr>`;
   }).join('');
 
   const antet = `<div style="font-size:11px;line-height:1.5;color:#374151">
@@ -6843,19 +6973,26 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600}
   <div class="title">CLASAMENT MUNCITORI + ECHIPE</div>
   <div class="subtitle">Generat ${fmtDate(todayISO())} • Șantier: ${state.santier || 'Corallis'}</div>
 
-  <h2>👷 Top muncitori</h2>
+  <h2>🏆 Veterani (≥ 5 zile lucrate)</h2>
   <table>
-    <thead><tr><th style="width:40px;text-align:center">Loc</th><th>Cod</th><th>Nume</th><th style="text-align:center">Ap.</th><th style="text-align:right">Zile (auto+manual)</th><th style="text-align:right">Ore</th><th style="text-align:right">EUR aprox</th></tr></thead>
-    <tbody>${muncRows || '<tr><td colspan="7" style="text-align:center;color:#9ca3af">Nimic</td></tr>'}</tbody>
+    <thead><tr><th style="width:40px;text-align:center">Loc</th><th>Cod</th><th>Nume</th><th style="text-align:center">Zile</th><th style="text-align:center">m/zi</th><th style="text-align:center">Total m</th><th style="text-align:center">Finalizate</th><th style="text-align:right">Scor</th></tr></thead>
+    <tbody>${vetRows || '<tr><td colspan="8" style="text-align:center;color:#9ca3af">Niciun veteran</td></tr>'}</tbody>
   </table>
+
+  ${c.nouVeniti.length > 0 ? `
+  <h2>🆕 Nou-veniți (sub 5 zile)</h2>
+  <table>
+    <thead><tr><th style="width:40px;text-align:center">Loc</th><th>Cod</th><th>Nume</th><th style="text-align:center">Zile</th><th style="text-align:center">m/zi</th><th style="text-align:center">Total m</th><th style="text-align:right">Status</th></tr></thead>
+    <tbody>${nouRows}</tbody>
+  </table>` : ''}
 
   <h2>🏗️ Top echipe</h2>
   <table>
-    <thead><tr><th style="width:40px;text-align:center">Loc</th><th>Echipă</th><th style="text-align:center">Ap.</th><th style="text-align:right">Zile (auto+manual)</th><th style="text-align:right">Metri</th><th style="text-align:right">EUR</th><th style="text-align:right">EUR/zi</th></tr></thead>
-    <tbody>${echRows || '<tr><td colspan="7" style="text-align:center;color:#9ca3af">Nimic</td></tr>'}</tbody>
+    <thead><tr><th style="width:40px;text-align:center">Loc</th><th>Echipă</th><th style="text-align:center">Zile</th><th style="text-align:center">m/zi</th><th style="text-align:center">Total m</th><th style="text-align:center">Finalizate</th><th style="text-align:center">EUR</th><th style="text-align:right">Scor</th></tr></thead>
+    <tbody>${echRows || '<tr><td colspan="8" style="text-align:center;color:#9ca3af">Nimic</td></tr>'}</tbody>
   </table>
 
-  <p style="font-size:10px;color:#6b7280">EUR/muncitor = distribuit uniform pe membrii echipei. Zile = câte zile efectiv (auto din rapoarte + manuale din editarea apartamentelor).</p>
+  <p style="font-size:10px;color:#6b7280"><b>Scor</b> = √zile × (m/zi) ÷ 10 + finalizate × 15. <b>m/zi</b> = producție medie zilnică (tub + cabluri + jgheab). <b>Total m</b> = atribuit proporțional cu zilele lucrate. Zile = auto din rapoarte + manuale din editarea apartamentelor.</p>
   <div class="footer">Document intern — ${state.firmaNume || 'iFort Systems SRL'} — ${fmtDate(todayISO())}</div>
 </div>
 </body></html>`;
