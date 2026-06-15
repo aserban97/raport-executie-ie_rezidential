@@ -3021,6 +3021,13 @@ function deschideEditareDetaliata(cod) {
         <div id="calendarPerioada" style="margin-top:10px"></div>
       </div>
 
+      <div class="card" style="border-left:4px solid #8b5cf6;margin-bottom:10px;background:#faf5ff">
+        <h4 style="margin:0 0 6px;color:#6d28d9;font-size:13px">🧠 Sugestii automate pe baza rapoartelor zilnice</h4>
+        <p class="small" style="margin:0 0 6px;color:#6b7280">Detectează cine a lucrat aici pe baza echipelor atribuite în alocări (sau echipa dominantă a apartamentului pentru zilele fără echipă)</p>
+        <button type="button" id="btnSugestii" class="btn-secondary" style="font-size:11px;padding:4px 10px;background:#8b5cf6;color:white;border:none">🔍 Generează sugestii</button>
+        <div id="zonaSugestii" style="margin-top:8px"></div>
+      </div>
+
       <div class="card" style="border-left:4px solid #f59e0b;margin-bottom:10px">
         <h4 style="margin:0 0 8px;color:#92400e;font-size:13px">👷 Muncitori adăugați manual</h4>
         <div id="listaMuncManuali"></div>
@@ -3116,6 +3123,131 @@ function deschideEditareDetaliata(cod) {
     document.getElementById('newEchZile').value = '';
     refreshLists();
   });
+  document.getElementById('btnSugestii').addEventListener('click', () => {
+    // Analizez rapoartele și calculez sugestiile
+    const zileCuEchipa = {}; // echipaId → Set de zile
+    const zileFaraEchipa = new Set(); // zile cu alocare la acest ap dar fără echipaId
+    const echipaCount = {}; // echipaId → câte alocări (pt determinare echipa dominantă)
+
+    state.rapoarte.forEach(r => {
+      (r.alocari || []).forEach(a => {
+        if (a.ap !== cod) return;
+        if (a.echipaId) {
+          if (!zileCuEchipa[a.echipaId]) zileCuEchipa[a.echipaId] = new Set();
+          zileCuEchipa[a.echipaId].add(r.data);
+          echipaCount[a.echipaId] = (echipaCount[a.echipaId] || 0) + 1;
+        } else {
+          zileFaraEchipa.add(r.data);
+        }
+      });
+    });
+
+    // Echipa dominantă (pt zile fără echipaId)
+    let echipaDominanta = null, maxC = 0;
+    Object.entries(echipaCount).forEach(([eid, c]) => {
+      if (c > maxC) { maxC = c; echipaDominanta = eid; }
+    });
+
+    // Construiesc map muncitor → zile + sursă
+    const muncitorZile = {}; // cod → { zile: Set, surse: Set }
+    Object.entries(zileCuEchipa).forEach(([eid, zileSet]) => {
+      const ech = state.echipe.find(x => x.id === eid);
+      if (!ech) return;
+      (ech.codMembri || []).forEach(codM => {
+        if (!muncitorZile[codM]) muncitorZile[codM] = { zile: new Set(), surse: new Set() };
+        zileSet.forEach(z => muncitorZile[codM].zile.add(z));
+        muncitorZile[codM].surse.add('Echipa ' + ech.nume);
+      });
+    });
+    // Pt zilele fără echipă → echipa dominantă
+    if (echipaDominanta && zileFaraEchipa.size > 0) {
+      const ech = state.echipe.find(x => x.id === echipaDominanta);
+      if (ech) {
+        (ech.codMembri || []).forEach(codM => {
+          if (!muncitorZile[codM]) muncitorZile[codM] = { zile: new Set(), surse: new Set() };
+          zileFaraEchipa.forEach(z => muncitorZile[codM].zile.add(z));
+          muncitorZile[codM].surse.add('Estimat: Echipa ' + ech.nume);
+        });
+      }
+    }
+    // Echipe sugerate (total zile cu echipaId)
+    const echipeSug = Object.entries(zileCuEchipa).map(([eid, zileSet]) => ({
+      echipaId: eid, zile: zileSet.size
+    }));
+
+    // Bag și cei deja existenți (muncitori + echipe)
+    const codExistenti = new Set((ap.muncitoriManuali || []).map(m => m.cod));
+    const echExistente = new Set((ap.echipeManuale || []).map(e => e.echipaId));
+
+    const sugList = Object.entries(muncitorZile)
+      .map(([codM, d]) => ({ cod: codM, zile: d.zile.size, surse: [...d.surse].join(', '), existaDeja: codExistenti.has(codM) }))
+      .sort((a, b) => b.zile - a.zile);
+
+    const zona = document.getElementById('zonaSugestii');
+    if (sugList.length === 0 && echipeSug.length === 0) {
+      zona.innerHTML = '<p class="small" style="color:#dc2626">Niciun raport cu echipă atribuită pentru acest apartament. Atribuie o echipă în rapoartele zilnice mai întâi.</p>';
+      return;
+    }
+
+    let html = '';
+    if (echipeSug.length > 0) {
+      html += '<div style="background:#d1fae5;padding:6px;border-radius:6px;margin-bottom:8px"><b style="font-size:11px;color:#065f46">🏗️ Echipe detectate:</b><br>';
+      html += '<table style="width:100%;font-size:11px;margin-top:4px"><tr><th style="text-align:left">+</th><th style="text-align:left">Echipă</th><th>Zile</th><th>Status</th></tr>';
+      echipeSug.forEach((e, i) => {
+        const ech = state.echipe.find(x => x.id === e.echipaId);
+        const exista = echExistente.has(e.echipaId);
+        html += `<tr>
+          <td><input type="checkbox" data-sug-ech="${i}" data-eid="${e.echipaId}" data-zile="${e.zile}" ${exista ? 'disabled' : 'checked'}></td>
+          <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${ech?.culoare || '#9ca3af'};margin-right:4px"></span>${ech?.nume || '?'}</td>
+          <td style="text-align:center">${e.zile}</td>
+          <td style="font-size:10px;color:${exista ? '#dc2626' : '#065f46'}">${exista ? 'există deja' : 'nou'}</td>
+        </tr>`;
+      });
+      html += '</table></div>';
+    }
+    if (sugList.length > 0) {
+      html += '<div style="background:#fef3c7;padding:6px;border-radius:6px;margin-bottom:8px"><b style="font-size:11px;color:#92400e">👷 Muncitori detectați:</b><br>';
+      html += '<table style="width:100%;font-size:11px;margin-top:4px"><tr><th style="text-align:left">+</th><th style="text-align:left">Cod / Nume</th><th>Zile</th><th>Sursă</th></tr>';
+      sugList.forEach((s, i) => {
+        const munc = state.muncitori.find(x => x.cod === s.cod);
+        html += `<tr>
+          <td><input type="checkbox" data-sug-munc="${i}" data-cod="${s.cod}" data-zile="${s.zile}" ${s.existaDeja ? 'disabled' : 'checked'}></td>
+          <td><b>${s.cod}</b> ${munc?.nume || '?'}</td>
+          <td style="text-align:center">${s.zile}</td>
+          <td style="font-size:10px;color:#6b7280">${s.existaDeja ? '<span style="color:#dc2626">există deja</span>' : s.surse}</td>
+        </tr>`;
+      });
+      html += '</table></div>';
+    }
+    html += '<button type="button" id="btnAplicaSug" class="btn-primary" style="font-size:11px;padding:4px 10px">✓ Aplică bifate</button>';
+    zona.innerHTML = html;
+
+    document.getElementById('btnAplicaSug').addEventListener('click', () => {
+      let nAdd = 0;
+      zona.querySelectorAll('[data-sug-munc]:checked').forEach(cb => {
+        const codM = cb.dataset.cod;
+        const zile = parseFloat(cb.dataset.zile);
+        if (!codExistenti.has(codM)) {
+          ap.muncitoriManuali.push({ cod: codM, zile, ore: 0 });
+          codExistenti.add(codM);
+          nAdd++;
+        }
+      });
+      zona.querySelectorAll('[data-sug-ech]:checked').forEach(cb => {
+        const eid = cb.dataset.eid;
+        const zile = parseFloat(cb.dataset.zile);
+        if (!echExistente.has(eid)) {
+          ap.echipeManuale.push({ echipaId: eid, zile });
+          echExistente.add(eid);
+          nAdd++;
+        }
+      });
+      toast(`${nAdd} sugestii aplicate`);
+      refreshLists();
+      zona.innerHTML = '<p class="small" style="color:#065f46">✓ Aplicat. Apasă "💾 Salvează" jos.</p>';
+    });
+  });
+
   document.getElementById('btnClearPer').addEventListener('click', () => {
     document.getElementById('manStart').value = '';
     document.getElementById('manEnd').value = '';
