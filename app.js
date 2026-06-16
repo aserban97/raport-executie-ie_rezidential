@@ -613,9 +613,23 @@ function genereazaPDF(r, extern = false) {
 
   <h2>Apartamente / zone lucrate azi</h2>
   <table>
-    <thead><tr><th>Locație</th>${extern ? '' : '<th style="text-align:right">Oameni</th>'}<th style="text-align:right">Stare</th></tr></thead>
+    <thead><tr><th>Locație</th>${extern ? '' : '<th style="text-align:right">Oameni</th><th>Echipa</th><th>Muncitori</th>'}<th style="text-align:right">Stare</th></tr></thead>
     <tbody>
-      ${r.alocari.map(a => `<tr><td>${a.ap}</td>${extern ? '' : `<td style="text-align:right">${a.oameni || '—'}</td>`}<td style="text-align:right">${{in_lucru:'În lucru',gata:'Gata',blocat:'Blocat'}[a.stareNoua] || '—'}</td></tr>`).join('')}
+      ${r.alocari.map(a => {
+        let echHTML = '—', munHTML = '—';
+        if (!extern && a.echipaId) {
+          const ech = state.echipe.find(e => e.id === a.echipaId);
+          if (ech) {
+            echHTML = `<span style="background:${ech.culoare};color:white;padding:1px 6px;border-radius:8px;font-size:10px">${ech.nume}</span>`;
+            const membri = (a.membriEchipa && a.membriEchipa.length) ? a.membriEchipa : (ech.codMembri || []);
+            munHTML = membri.map(cm => {
+              const m = state.muncitori.find(x => x.cod === cm);
+              return m ? `${cm} ${m.nume.split(' ')[0]}` : cm;
+            }).join(', ') || '—';
+          }
+        }
+        return `<tr><td>${a.ap}</td>${extern ? '' : `<td style="text-align:right">${a.oameni || '—'}</td><td style="font-size:12px">${echHTML}</td><td style="font-size:11px">${munHTML}</td>`}<td style="text-align:right">${{in_lucru:'În lucru',gata:'Gata',blocat:'Blocat'}[a.stareNoua] || '—'}</td></tr>`;
+      }).join('')}
     </tbody>
   </table>
 
@@ -631,7 +645,20 @@ function genereazaPDF(r, extern = false) {
 </div>`;
 
   // PAGINI urmatoare: detaliu per apartament
-  const apartPages = r.alocari.map((a, idx) => `
+  const apartPages = r.alocari.map((a, idx) => {
+    let echDet = '—', munDet = '—';
+    if (!extern && a.echipaId) {
+      const ech = state.echipe.find(e => e.id === a.echipaId);
+      if (ech) {
+        echDet = `<span style="background:${ech.culoare};color:white;padding:2px 8px;border-radius:8px;font-size:12px">${ech.nume}</span>`;
+        const membri = (a.membriEchipa && a.membriEchipa.length) ? a.membriEchipa : (ech.codMembri || []);
+        munDet = membri.map(cm => {
+          const m = state.muncitori.find(x => x.cod === cm);
+          return m ? `<b>${cm}</b> ${m.nume}` : cm;
+        }).join(' • ') || '—';
+      }
+    }
+    return `
 <div class="page">
   <div class="header">
     <img src="logo.png" class="logo" alt="iFort" />
@@ -643,7 +670,9 @@ function genereazaPDF(r, extern = false) {
 
   <div class="info-grid">
     <div><b>Locație:</b> ${a.ap}</div>
-    ${extern ? '' : `<div><b>Oameni alocați:</b> ${a.oameni || '—'}</div>`}
+    ${extern ? '' : `<div><b>Oameni alocați:</b> ${a.oameni || '—'}</div>
+    <div><b>Echipa:</b> ${echDet}</div>
+    <div style="grid-column:1/-1"><b>Muncitori:</b> ${munDet}</div>`}
     <div><b>Stare:</b> ${{in_lucru:'În lucru',gata:'Gata',blocat:'Blocat'}[a.stareNoua] || '—'}</div>
     <div><b>Antreprenor:</b> ${antreprenor}</div>
   </div>
@@ -655,7 +684,8 @@ function genereazaPDF(r, extern = false) {
   </table>
 
   <div class="footer">Pagina ${idx + 2} — Document generat — iFort Systems S.R.L.</div>
-</div>`).join('');
+</div>`;
+  }).join('');
 
   // PAGINĂ PONTAJ (doar PDF intern, dacă există pontaj)
   let pontajPage = '';
