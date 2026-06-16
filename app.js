@@ -6398,19 +6398,20 @@ function genereazaRaportConsolidatPDF() {
       <td style="text-align:right">${a.mp || '—'}</td>
       <td style="text-align:center;color:${stareCol[stare]};font-weight:600">${stareIcon[stare]} ${stareNume[stare]}</td>
       <td style="text-align:right">${d.zileLucr.size}</td>
-      <td style="text-align:right">${d.omZileTotal}</td>
+      <td style="text-align:right">${d.zileLucr.size > 0 ? (d.omZileTotal / d.zileLucr.size).toFixed(1) : '—'}</td>
       <td style="text-align:right;color:#1e40af;font-weight:600">${Math.round(tubVal)}</td>
       <td style="text-align:right;color:#10b981;font-weight:600">${Math.round(cabluVal)}</td>
       <td style="text-align:right;font-weight:700;color:#10b981">${d.valoareEur.toFixed(2)} €</td>
       <td style="text-align:right">${eurPerMp}</td>
     </tr>`;
   });
+  const totalZileLucr = datele.reduce((s, d) => s + d.zileLucr.size, 0);
   const sumarTotalRow = `<tr style="background:#f3f4f6;font-weight:700;font-size:13px">
     <td colspan="2">TOTAL (${totalAps} ap.)</td>
     <td style="text-align:right">${totalMp || '—'}</td>
     <td></td>
-    <td></td>
-    <td style="text-align:right">${totalOmZile}</td>
+    <td style="text-align:right">${totalZileLucr}</td>
+    <td style="text-align:right">${totalZileLucr > 0 ? (totalOmZile / totalZileLucr).toFixed(1) : '—'}</td>
     <td style="text-align:right;color:#1e40af">${Math.round(totalTub)}</td>
     <td style="text-align:right;color:#10b981">${Math.round(totalCablu)}</td>
     <td style="text-align:right;color:#10b981;font-size:14px">${totalEur.toFixed(2)} €</td>
@@ -6559,7 +6560,7 @@ th{background:#1e40af;color:white;text-align:left;font-weight:600}
   <table>
     <thead><tr>
       <th>Cod</th><th>Tip</th><th style="text-align:right">mp</th><th style="text-align:center">Stare</th>
-      <th style="text-align:right">Zile</th><th style="text-align:right">Om-zile</th>
+      <th style="text-align:right">Zile lucrate</th><th style="text-align:right">Media oameni/zi</th>
       <th style="text-align:right">Tub (m)</th><th style="text-align:right">Cabluri (m)</th>
       <th style="text-align:right">Valoare €</th><th style="text-align:right">€/mp</th>
     </tr></thead>
@@ -6593,8 +6594,8 @@ function genereazaRaportConsolidatExcel() {
   csv += `Apartamente incluse:,${aps.length}\n\n`;
 
   csv += `TABEL SUMAR\n`;
-  csv += `Cod,Tip,mp,Stare,Zile lucr.,Om-zile,Tub (m),Cabluri (m),Valoare EUR,EUR/mp\n`;
-  let totalEur = 0, totalMp = 0, totalTub = 0, totalCablu = 0, totalOmZ = 0;
+  csv += `Cod,Tip,mp,Stare,Zile lucrate,Media oameni/zi,Tub (m),Cabluri (m),Valoare EUR,EUR/mp\n`;
+  let totalEur = 0, totalMp = 0, totalTub = 0, totalCablu = 0, totalOmZ = 0, totalZile = 0;
   datele.forEach(d => {
     const a = d.ap;
     const tub = d.totalMat.tub20 || 0;
@@ -6604,14 +6605,17 @@ function genereazaRaportConsolidatExcel() {
       if (m && m.nume.toLowerCase().includes('cablu')) cablu += v;
     });
     const eurMp = a.mp ? (d.valoareEur / a.mp).toFixed(2) : '';
-    csv += `${a.cod},"${a.tip}",${a.mp || ''},${stareNume[a.stare || 'neinceput']},${d.zileLucr.size},${d.omZileTotal},${Math.round(tub)},${Math.round(cablu)},${d.valoareEur.toFixed(2)},${eurMp}\n`;
+    const medOam = d.zileLucr.size > 0 ? (d.omZileTotal / d.zileLucr.size).toFixed(1) : '';
+    csv += `${a.cod},"${a.tip}",${a.mp || ''},${stareNume[a.stare || 'neinceput']},${d.zileLucr.size},${medOam},${Math.round(tub)},${Math.round(cablu)},${d.valoareEur.toFixed(2)},${eurMp}\n`;
     totalEur += d.valoareEur;
     if (a.mp) totalMp += a.mp;
     totalTub += tub;
     totalCablu += cablu;
     totalOmZ += d.omZileTotal;
+    totalZile += d.zileLucr.size;
   });
-  csv += `TOTAL,,${totalMp},,,${totalOmZ},${Math.round(totalTub)},${Math.round(totalCablu)},${totalEur.toFixed(2)},${totalMp ? (totalEur / totalMp).toFixed(2) : ''}\n\n`;
+  const medOamT = totalZile > 0 ? (totalOmZ / totalZile).toFixed(1) : '';
+  csv += `TOTAL,,${totalMp},,${totalZile},${medOamT},${Math.round(totalTub)},${Math.round(totalCablu)},${totalEur.toFixed(2)},${totalMp ? (totalEur / totalMp).toFixed(2) : ''}\n\n`;
 
   csv += `DETALIU MATERIALE PER APARTAMENT\n`;
   datele.forEach(d => {

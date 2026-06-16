@@ -1,4 +1,4 @@
-const CACHE = 'ifort-raport-v49';
+const CACHE = 'ifort-raport-v50';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './manifest.json', './logo.png'];
 
 self.addEventListener('install', (e) => {
