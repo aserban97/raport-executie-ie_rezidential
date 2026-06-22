@@ -382,12 +382,30 @@
       <h3>Sumar lunar prezență</h3>
       <div class="card">
         <label>
-          Lună
+          Lună (pentru sumar pe ecran)
           <input type="month" id="sumarLuna" />
         </label>
         <div id="sumarPrezenta"></div>
-        <div class="actions">
-          <button type="button" class="btn-primary" id="btnPontajLunarPDF">📊 Pontaj lunar PDF (matrice)</button>
+        <div style="background:#dbeafe;border-radius:8px;padding:10px;margin-top:14px">
+          <p class="small" style="margin:0 0 6px;color:#1e40af;font-weight:600">📊 Export pontaj PDF — alege perioada:</p>
+          <div class="row" style="margin-bottom:6px">
+            <label>
+              De la luna
+              <input type="month" id="pontajPDFStart" />
+            </label>
+            <label>
+              Până la luna (inclusiv)
+              <input type="month" id="pontajPDFEnd" />
+            </label>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+            <button type="button" class="btn-secondary" id="btnPontajLunaCurenta" style="font-size:11px;padding:5px 10px">📅 Luna curentă</button>
+            <button type="button" class="btn-secondary" id="btnPontajUltimele3" style="font-size:11px;padding:5px 10px">📅 Ultimele 3 luni</button>
+            <button type="button" class="btn-secondary" id="btnPontajTot" style="font-size:11px;padding:5px 10px">📅 Total (toate lunile)</button>
+          </div>
+        </div>
+        <div class="actions" style="margin-top:10px">
+          <button type="button" class="btn-primary" id="btnPontajLunarPDF">📊 Generează PDF pontaj</button>
           <button type="button" class="btn-secondary" id="btnExportPrezenta">📅 Export prezență simplu (PDF)</button>
         </div>
       </div>

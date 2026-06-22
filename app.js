@@ -2810,79 +2810,163 @@ function renderSumarPrezenta() {
 document.getElementById('sumarLuna').addEventListener('change', renderSumarPrezenta);
 
 // ===== PONTAJ LUNAR PDF (matrice) =====
-document.getElementById('btnPontajLunarPDF').addEventListener('click', () => {
-  const luna = document.getElementById('sumarLuna').value;
-  if (!luna) { toast('Selectează o lună'); return; }
-  const [an, lunaNr] = luna.split('-').map(Number);
-  const ultimaZi = new Date(an, lunaNr, 0).getDate();
-  const start = `${luna}-01`;
-  const end = `${luna}-${String(ultimaZi).padStart(2, '0')}`;
-  const lunaNume = new Date(an, lunaNr - 1, 1).toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
+// Shortcut: luna curentă
+const btnPontajLC = document.getElementById('btnPontajLunaCurenta');
+if (btnPontajLC) btnPontajLC.addEventListener('click', () => {
+  const d = new Date();
+  const luna = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  document.getElementById('pontajPDFStart').value = luna;
+  document.getElementById('pontajPDFEnd').value = luna;
+});
+// Shortcut: ultimele 3 luni
+const btnPontaj3 = document.getElementById('btnPontajUltimele3');
+if (btnPontaj3) btnPontaj3.addEventListener('click', () => {
+  const d = new Date();
+  const endLuna = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const d2 = new Date(d.getFullYear(), d.getMonth() - 2, 1);
+  const startLuna = `${d2.getFullYear()}-${String(d2.getMonth() + 1).padStart(2, '0')}`;
+  document.getElementById('pontajPDFStart').value = startLuna;
+  document.getElementById('pontajPDFEnd').value = endLuna;
+});
+// Shortcut: tot
+const btnPontajTot = document.getElementById('btnPontajTot');
+if (btnPontajTot) btnPontajTot.addEventListener('click', () => {
+  if (state.prezenta.length === 0) { toast('Niciun pontaj salvat'); return; }
+  const zile = state.prezenta.map(p => p.data).sort();
+  document.getElementById('pontajPDFStart').value = zile[0].slice(0, 7);
+  document.getElementById('pontajPDFEnd').value = zile[zile.length - 1].slice(0, 7);
+});
 
-  // Muncitorii activi cel puțin 1 zi în lună
-  const muncitoriLuna = state.muncitori.filter(m =>
+document.getElementById('btnPontajLunarPDF').addEventListener('click', () => {
+  let lunaStart = document.getElementById('pontajPDFStart').value;
+  let lunaEnd = document.getElementById('pontajPDFEnd').value;
+  // Fallback: dacă nu sunt setate, folosesc sumarLuna
+  if (!lunaStart && !lunaEnd) {
+    const fallback = document.getElementById('sumarLuna').value;
+    if (!fallback) { toast('Selectează intervalul de luni'); return; }
+    lunaStart = lunaEnd = fallback;
+  }
+  if (!lunaStart) lunaStart = lunaEnd;
+  if (!lunaEnd) lunaEnd = lunaStart;
+  if (lunaEnd < lunaStart) { toast('Luna sfârșit înainte de start'); return; }
+
+  // Calculez perioada totală
+  const [anS, mS] = lunaStart.split('-').map(Number);
+  const [anE, mE] = lunaEnd.split('-').map(Number);
+  const start = `${lunaStart}-01`;
+  const ultimaZiEnd = new Date(anE, mE, 0).getDate();
+  const end = `${lunaEnd}-${String(ultimaZiEnd).padStart(2, '0')}`;
+
+  // Construiesc lista zilelor din interval
+  const toateZilele = []; // { iso, an, luna, zi, dow, weekend, label }
+  let cursor = new Date(anS, mS - 1, 1);
+  const finalCursor = new Date(anE, mE - 1, ultimaZiEnd);
+  while (cursor <= finalCursor) {
+    const an = cursor.getFullYear();
+    const lunaN = cursor.getMonth() + 1;
+    const zi = cursor.getDate();
+    const dow = cursor.getDay();
+    const iso = `${an}-${String(lunaN).padStart(2, '0')}-${String(zi).padStart(2, '0')}`;
+    toateZilele.push({
+      iso, an, luna: lunaN, zi, dow,
+      weekend: dow === 0 || dow === 6,
+      label: zi,
+      lunaIso: `${an}-${String(lunaN).padStart(2, '0')}`,
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  // Muncitorii activi măcar 1 zi în interval
+  const muncitoriPerioada = state.muncitori.filter(m =>
     m.dataStart <= end && (!m.dataEnd || m.dataEnd >= start)
   ).sort((a, b) => a.cod.localeCompare(b.cod));
 
-  if (muncitoriLuna.length === 0) {
-    toast('Niciun muncitor în această lună');
+  if (muncitoriPerioada.length === 0) {
+    toast('Niciun muncitor activ în această perioadă');
     return;
   }
 
   // Echipe map
   const echipeMap = {};
-  state.echipe.forEach(e => e.codMembri.forEach(c => { echipeMap[c] = e; }));
+  state.echipe.forEach(e => (e.codMembri || []).forEach(c => { echipeMap[c] = e; }));
 
-  // Prezența lunii: { 'cod-yyyy-mm-dd': ore } + flag absent
+  // Prezența pentru tot intervalul
   const prez = {};
   state.prezenta.filter(p => p.data >= start && p.data <= end).forEach(p => {
     prez[`${p.cod}-${p.data}`] = p;
   });
 
-  // Identifică weekend
-  function isWeekend(zi) {
-    const d = new Date(an, lunaNr - 1, zi);
-    return d.getDay() === 0 || d.getDay() === 6;
-  }
+  // Lunile distincte pentru titlu
+  const lunileDistincte = [...new Set(toateZilele.map(d => d.lunaIso))];
+  const lunaNumeRange = lunileDistincte.length === 1
+    ? new Date(anS, mS - 1, 1).toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' })
+    : `${new Date(anS, mS - 1, 1).toLocaleDateString('ro-RO', { month: 'short', year: 'numeric' })} → ${new Date(anE, mE - 1, 1).toLocaleDateString('ro-RO', { month: 'short', year: 'numeric' })}`;
 
-  // Header tabel: Nr | Cod | Nume | Echipa | Z1 ... Zn | Total
-  let header = '<tr>';
-  header += '<th style="padding:4px;font-size:9px">Cod</th>';
-  header += '<th style="padding:4px;font-size:9px;text-align:left">Nume</th>';
-  header += '<th style="padding:4px;font-size:9px">Echipa</th>';
-  for (let z = 1; z <= ultimaZi; z++) {
-    const we = isWeekend(z) ? 'background:#fef3c7' : '';
-    header += `<th style="padding:2px;font-size:9px;text-align:center;width:22px;${we}">${z}</th>`;
-  }
-  header += '<th style="padding:4px;font-size:10px;text-align:right;background:#e0e7ff">Total</th>';
-  header += '</tr>';
+  // Header — afișează și luna pe rând pentru separare
+  // Rândul 1: luni (cu colspan) | Rândul 2: zile
+  const ultimaZi = toateZilele.length; // total nr zile (nu mai e ultimaZi a unei singure luni)
+
+  let headerLuni = '<tr><th style="padding:4px;font-size:9px" colspan="3"></th>';
+  let headerZile = '<tr><th style="padding:4px;font-size:9px">Cod</th><th style="padding:4px;font-size:9px;text-align:left">Nume</th><th style="padding:4px;font-size:9px">Echipa</th>';
+
+  // Grupez pe lună
+  const grupeLuni = [];
+  let lunaCurenta = null;
+  toateZilele.forEach(d => {
+    if (lunaCurenta?.lunaIso !== d.lunaIso) {
+      lunaCurenta = { lunaIso: d.lunaIso, an: d.an, luna: d.luna, count: 0, nume: new Date(d.an, d.luna - 1, 1).toLocaleDateString('ro-RO', { month: 'short' }) + ' ' + d.an };
+      grupeLuni.push(lunaCurenta);
+    }
+    lunaCurenta.count++;
+  });
+  grupeLuni.forEach((g, idx) => {
+    const bg = idx % 2 === 0 ? '#1e40af' : '#3b82f6';
+    headerLuni += `<th style="padding:3px;font-size:10px;text-align:center;background:${bg};color:white;border-right:2px solid white" colspan="${g.count}">${g.nume}</th>`;
+  });
+  headerLuni += '<th style="padding:4px;font-size:10px;background:#e0e7ff" colspan="2"></th>';
+  headerLuni += '</tr>';
+
+  toateZilele.forEach(d => {
+    const we = d.weekend ? 'background:#fef3c7' : '';
+    headerZile += `<th style="padding:2px;font-size:8px;text-align:center;width:20px;${we}">${d.label}</th>`;
+  });
+  headerZile += '<th style="padding:4px;font-size:10px;text-align:right;background:#e0e7ff">Total ore</th>';
+  headerZile += '<th style="padding:4px;font-size:10px;text-align:right;background:#fef3c7;color:#92400e">Zile prez.</th>';
+  headerZile += '</tr>';
 
   // Rânduri per muncitor
   let totalGeneralOre = 0;
-  const totalPerZi = new Array(ultimaZi + 1).fill(0);
+  let totalGeneralZilePrez = 0;
+  const totalPerZi = new Array(toateZilele.length).fill(0);
   let rows = '';
-  muncitoriLuna.forEach(m => {
+  muncitoriPerioada.forEach(m => {
     const ech = echipeMap[m.cod];
     let totalMuncitor = 0;
+    let zilePrezent = 0;
     let celule = '';
-    for (let z = 1; z <= ultimaZi; z++) {
-      const dataZi = `${luna}-${String(z).padStart(2, '0')}`;
-      const p = prez[`${m.cod}-${dataZi}`];
-      const we = isWeekend(z) ? 'background:#fef9c3' : '';
-      if (!p) {
-        celule += `<td style="text-align:center;padding:2px;font-size:9px;color:#d1d5db;${we}">-</td>`;
+    toateZilele.forEach((d, idx) => {
+      const p = prez[`${m.cod}-${d.iso}`];
+      const we = d.weekend ? 'background:#fef9c3' : '';
+      // Verific dacă muncitorul era angajat în ziua aia
+      const activ = m.dataStart <= d.iso && (!m.dataEnd || m.dataEnd >= d.iso);
+      if (!activ) {
+        celule += `<td style="text-align:center;padding:2px;font-size:8px;color:#e5e7eb;background:#f3f4f6">×</td>`;
+      } else if (!p) {
+        celule += `<td style="text-align:center;padding:2px;font-size:8px;color:#d1d5db;${we}">-</td>`;
       } else if (p.absent) {
-        celule += `<td style="text-align:center;padding:2px;font-size:9px;color:#dc2626;font-weight:700;${we}">A</td>`;
+        celule += `<td style="text-align:center;padding:2px;font-size:8px;color:#dc2626;font-weight:700;${we}">A</td>`;
       } else if (p.ore > 0) {
         totalMuncitor += p.ore;
-        totalPerZi[z] += p.ore;
+        zilePrezent++;
+        totalPerZi[idx] += p.ore;
         const ore = p.ore === Math.floor(p.ore) ? p.ore.toFixed(0) : p.ore.toFixed(1);
-        celule += `<td style="text-align:center;padding:2px;font-size:9px;color:#1e40af;${we}">${ore}</td>`;
+        celule += `<td style="text-align:center;padding:2px;font-size:8px;color:#1e40af;${we}">${ore}</td>`;
       } else {
-        celule += `<td style="text-align:center;padding:2px;font-size:9px;color:#d1d5db;${we}">-</td>`;
+        celule += `<td style="text-align:center;padding:2px;font-size:8px;color:#d1d5db;${we}">-</td>`;
       }
-    }
+    });
     totalGeneralOre += totalMuncitor;
+    totalGeneralZilePrez += zilePrezent;
     const echHTML = ech ? `<span style="background:${ech.culoare};color:white;padding:1px 4px;border-radius:6px;font-size:9px">${ech.nume}</span>` : '—';
     rows += `<tr>
       <td style="padding:3px;font-size:10px;text-align:center;font-weight:700">${m.cod}</td>
@@ -2890,16 +2974,23 @@ document.getElementById('btnPontajLunarPDF').addEventListener('click', () => {
       <td style="padding:3px;font-size:10px;text-align:center">${echHTML}</td>
       ${celule}
       <td style="padding:3px;font-size:11px;text-align:right;font-weight:700;background:#e0e7ff;color:#1e40af">${totalMuncitor.toFixed(1)}h</td>
+      <td style="padding:3px;font-size:11px;text-align:center;font-weight:700;background:#fef3c7;color:#92400e">${zilePrezent}</td>
     </tr>`;
   });
+
   // Total per zi rând
   let totalRow = `<tr style="background:#f3f4f6;font-weight:700">
     <td colspan="3" style="padding:4px;text-align:right;font-size:10px">TOTAL zi</td>`;
-  for (let z = 1; z <= ultimaZi; z++) {
-    const we = isWeekend(z) ? 'background:#fef9c3' : '';
-    totalRow += `<td style="padding:2px;font-size:9px;text-align:center;${we}">${totalPerZi[z] > 0 ? totalPerZi[z].toFixed(0) : '-'}</td>`;
-  }
-  totalRow += `<td style="padding:4px;font-size:12px;text-align:right;background:#1e40af;color:white">${totalGeneralOre.toFixed(1)}h</td></tr>`;
+  toateZilele.forEach((d, idx) => {
+    const we = d.weekend ? 'background:#fef9c3' : '';
+    totalRow += `<td style="padding:2px;font-size:8px;text-align:center;${we}">${totalPerZi[idx] > 0 ? totalPerZi[idx].toFixed(0) : '-'}</td>`;
+  });
+  totalRow += `<td style="padding:4px;font-size:12px;text-align:right;background:#1e40af;color:white">${totalGeneralOre.toFixed(1)}h</td>`;
+  totalRow += `<td style="padding:4px;font-size:12px;text-align:center;background:#f59e0b;color:white">${totalGeneralZilePrez}</td></tr>`;
+
+  // Combine header
+  const header = headerLuni + headerZile;
+  const lunaNume = lunaNumeRange;
 
   // HTML complet
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="format-detection" content="telephone=no, date=no, address=no, email=no"><title>Pontaj ${lunaNume}</title>
