@@ -217,7 +217,7 @@ function adaugaAlocare() {
         👷 Bifează cine a lucrat la acest apartament
         <div style="font-size:11px;color:#6b7280;font-weight:normal;margin-top:2px">Suprascrie echipa pentru tracking corect (ex: dacă astăzi unul din echipă a lipsit)</div>
       </div>
-      <div class="muncitori-checkboxes" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(170px, 1fr));gap:6px"></div>
+      <div class="muncitori-checkboxes" style="display:flex;flex-direction:column;gap:8px"></div>
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid #c4b5fd;padding-top:10px">
         <button type="button" class="btn-clear-munc" style="font-size:12px;padding:6px 12px;background:#dc2626;color:white;border:none;border-radius:4px;cursor:pointer">🗑️ Șterge tot</button>
         <button type="button" class="btn-close-munc" style="font-size:12px;padding:6px 12px;background:#6b7280;color:white;border:none;border-radius:4px;cursor:pointer">Închide</button>
@@ -283,11 +283,14 @@ function adaugaAlocare() {
     }).sort((a, b) => a.cod.localeCompare(b.cod));
 
     muncContainer.innerHTML = muncActivi.map(m => `
-      <label style="display:flex;align-items:center;gap:8px;background:white;padding:10px 12px;border-radius:6px;border:2px solid #d1d5db;cursor:pointer;font-size:13px;transition:all 0.15s">
-        <input type="checkbox" value="${m.cod}" style="margin:0;width:18px;height:18px;cursor:pointer;flex-shrink:0">
-        <span style="line-height:1.2"><b style="color:#1e40af">${m.cod}</b><br><span style="font-size:12px;color:#374151">${m.nume}</span></span>
+      <label style="display:flex;align-items:center;gap:12px;background:white;padding:12px 14px;border-radius:8px;border:2px solid #d1d5db;cursor:pointer;font-size:14px;transition:all 0.15s;min-height:48px">
+        <input type="checkbox" value="${m.cod}" style="margin:0;width:22px;height:22px;cursor:pointer;flex-shrink:0;accent-color:#10b981">
+        <span style="flex:1;display:flex;align-items:baseline;gap:8px;line-height:1.3">
+          <b style="color:#1e40af;font-size:16px">${m.cod}</b>
+          <span style="color:#111;font-weight:500">${m.nume}</span>
+        </span>
       </label>
-    `).join('') || '<p class="small" style="color:#9ca3af;grid-column:1/-1">Niciun muncitor activ</p>';
+    `).join('') || '<p class="small" style="color:#9ca3af">Niciun muncitor activ</p>';
 
     // Highlight vizual pe label când bifezi
     muncContainer.querySelectorAll('label').forEach(lbl => {
