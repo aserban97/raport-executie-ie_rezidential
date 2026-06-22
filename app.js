@@ -201,7 +201,6 @@ function adaugaAlocare() {
         <option value="">— Echipă —</option>
         ${echipeOptions}
       </select>
-      <button type="button" class="btn-muncitori-custom" style="font-size:11px;padding:4px 8px;background:#8b5cf6;color:white;border:none;border-radius:4px;cursor:pointer" title="Alege muncitori individual">👷 Muncitori</button>
       <select class="stare-noua">
         <option value="">— Stare —</option>
         <option value="in_lucru">În lucru</option>
@@ -210,12 +209,19 @@ function adaugaAlocare() {
       </select>
       <button type="button" class="btn-del">×</button>
     </div>
-    <div class="muncitori-custom-panel" style="display:none;background:#faf5ff;border:1px solid #8b5cf6;border-radius:6px;padding:8px;margin-top:6px">
-      <div style="font-size:11px;color:#6d28d9;font-weight:600;margin-bottom:4px">👷 Bifează muncitorii care au lucrat aici (suprascrie echipa):</div>
-      <div class="muncitori-checkboxes" style="display:flex;flex-wrap:wrap;gap:4px"></div>
-      <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-        <button type="button" class="btn-clear-munc" style="font-size:10px;padding:2px 8px;background:#dc2626;color:white;border:none;border-radius:3px;cursor:pointer">Șterge selecția</button>
-        <span class="munc-count" style="font-size:10px;color:#6d28d9;font-weight:600"></span>
+    <div style="margin-top:8px">
+      <button type="button" class="btn-muncitori-custom" style="width:100%;font-size:13px;padding:10px;background:#8b5cf6;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600">👷 Alege muncitori care au lucrat aici (opțional)</button>
+    </div>
+    <div class="muncitori-custom-panel" style="display:none;background:#faf5ff;border:2px solid #8b5cf6;border-radius:8px;padding:14px;margin-top:8px">
+      <div style="font-size:13px;color:#6d28d9;font-weight:700;margin-bottom:10px;border-bottom:1px solid #c4b5fd;padding-bottom:6px">
+        👷 Bifează cine a lucrat la acest apartament
+        <div style="font-size:11px;color:#6b7280;font-weight:normal;margin-top:2px">Suprascrie echipa pentru tracking corect (ex: dacă astăzi unul din echipă a lipsit)</div>
+      </div>
+      <div class="muncitori-checkboxes" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(170px, 1fr));gap:6px"></div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid #c4b5fd;padding-top:10px">
+        <button type="button" class="btn-clear-munc" style="font-size:12px;padding:6px 12px;background:#dc2626;color:white;border:none;border-radius:4px;cursor:pointer">🗑️ Șterge tot</button>
+        <button type="button" class="btn-close-munc" style="font-size:12px;padding:6px 12px;background:#6b7280;color:white;border:none;border-radius:4px;cursor:pointer">Închide</button>
+        <span class="munc-count" style="font-size:12px;color:#6d28d9;font-weight:700;margin-left:auto"></span>
       </div>
     </div>
     <div class="alocare-materiale">${materialeHTML}</div>
@@ -242,16 +248,29 @@ function adaugaAlocare() {
   const muncCount = block.querySelector('.munc-count');
 
   function refreshMuncCount() {
-    const n = muncContainer.querySelectorAll('input[type=checkbox]:checked').length;
+    const checked = muncContainer.querySelectorAll('input[type=checkbox]:checked');
+    const n = checked.length;
     if (n > 0) {
-      muncCount.textContent = `✓ ${n} muncitori selectați (va suprascrie echipa)`;
+      const codes = Array.from(checked).map(cb => cb.value).sort().join(', ');
+      muncCount.textContent = `✓ ${n} selectați: ${codes}`;
       muncBtn.style.background = '#10b981';
-      muncBtn.textContent = `👷 ${n} aleși`;
+      muncBtn.innerHTML = `✓ ${n} muncitori aleși (${codes}) — click pentru a modifica`;
     } else {
       muncCount.textContent = '';
       muncBtn.style.background = '#8b5cf6';
-      muncBtn.textContent = '👷 Muncitori';
+      muncBtn.textContent = '👷 Alege muncitori care au lucrat aici (opțional)';
     }
+    // Actualizez și stilurile label-urilor
+    muncContainer.querySelectorAll('label').forEach(lbl => {
+      const cb = lbl.querySelector('input');
+      if (cb.checked) {
+        lbl.style.background = '#dcfce7';
+        lbl.style.borderColor = '#10b981';
+      } else {
+        lbl.style.background = 'white';
+        lbl.style.borderColor = '#d1d5db';
+      }
+    });
   }
 
   function populateMuncitori() {
@@ -264,11 +283,27 @@ function adaugaAlocare() {
     }).sort((a, b) => a.cod.localeCompare(b.cod));
 
     muncContainer.innerHTML = muncActivi.map(m => `
-      <label style="display:inline-flex;align-items:center;gap:3px;background:white;padding:3px 6px;border-radius:4px;border:1px solid #d1d5db;cursor:pointer;font-size:11px">
-        <input type="checkbox" value="${m.cod}" style="margin:0">
-        <span><b>${m.cod}</b> ${m.nume.split(' ')[0]}</span>
+      <label style="display:flex;align-items:center;gap:8px;background:white;padding:10px 12px;border-radius:6px;border:2px solid #d1d5db;cursor:pointer;font-size:13px;transition:all 0.15s">
+        <input type="checkbox" value="${m.cod}" style="margin:0;width:18px;height:18px;cursor:pointer;flex-shrink:0">
+        <span style="line-height:1.2"><b style="color:#1e40af">${m.cod}</b><br><span style="font-size:12px;color:#374151">${m.nume}</span></span>
       </label>
-    `).join('') || '<p class="small" style="color:#9ca3af">Niciun muncitor activ</p>';
+    `).join('') || '<p class="small" style="color:#9ca3af;grid-column:1/-1">Niciun muncitor activ</p>';
+
+    // Highlight vizual pe label când bifezi
+    muncContainer.querySelectorAll('label').forEach(lbl => {
+      const cb = lbl.querySelector('input');
+      const updateStyle = () => {
+        if (cb.checked) {
+          lbl.style.background = '#dcfce7';
+          lbl.style.borderColor = '#10b981';
+        } else {
+          lbl.style.background = 'white';
+          lbl.style.borderColor = '#d1d5db';
+        }
+      };
+      cb.addEventListener('change', updateStyle);
+      updateStyle();
+    });
 
     muncContainer.querySelectorAll('input[type=checkbox]').forEach(cb => {
       cb.addEventListener('change', refreshMuncCount);
@@ -302,6 +337,10 @@ function adaugaAlocare() {
       cb.dataset.userTouched = '1';
     });
     refreshMuncCount();
+  });
+
+  block.querySelector('.btn-close-munc').addEventListener('click', () => {
+    muncPanel.style.display = 'none';
   });
 
   // Când se schimbă echipa, dacă nu ai bifat custom, propune membrii echipei
