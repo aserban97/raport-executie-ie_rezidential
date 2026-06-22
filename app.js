@@ -3032,9 +3032,11 @@ td{border:1px solid #e5e7eb}
   <div class="subtitle">Generat: ${fmtDate(todayISO())}</div>
 
   <div class="info-box">
-    <div><b>Muncitori activi:</b> ${muncitoriLuna.length}</div>
-    <div><b>Zile lunare:</b> ${ultimaZi}</div>
-    <div><b>Total ore lucrate:</b> ${totalGeneralOre.toFixed(1)}h</div>
+    <div><b>Perioada:</b> ${fmtDate(start)} → ${fmtDate(end)}</div>
+    <div><b>Muncitori:</b> ${muncitoriPerioada.length}</div>
+    <div><b>Zile în interval:</b> ${toateZilele.length}</div>
+    <div><b>Total ore:</b> ${totalGeneralOre.toFixed(1)}h</div>
+    <div><b>Total zile prezență:</b> ${totalGeneralZilePrez}</div>
   </div>
 
   <table>
