@@ -2927,11 +2927,11 @@ document.getElementById('btnPontajLunarPDF').addEventListener('click', () => {
   headerLuni += '</tr>';
 
   toateZilele.forEach(d => {
-    const we = d.weekend ? 'background:#fef3c7' : '';
-    headerZile += `<th style="padding:2px;font-size:8px;text-align:center;width:20px;${we}">${d.label}</th>`;
+    const we = d.weekend ? 'background:#e0e7ff;color:#6b7280' : 'background:#1e40af;color:white';
+    headerZile += `<th style="padding:3px 1px;font-size:9px;text-align:center;width:22px;min-width:22px;${we}">${d.label}</th>`;
   });
-  headerZile += '<th style="padding:4px;font-size:10px;text-align:right;background:#e0e7ff">Total ore</th>';
-  headerZile += '<th style="padding:4px;font-size:10px;text-align:right;background:#fef3c7;color:#92400e">Zile prez.</th>';
+  headerZile += '<th style="padding:4px;font-size:10px;text-align:right;background:#1e40af;color:white">Total ore</th>';
+  headerZile += '<th style="padding:4px;font-size:10px;text-align:right;background:#f59e0b;color:white">Zile lucr.</th>';
   headerZile += '</tr>';
 
   // Rânduri per muncitor
@@ -2946,23 +2946,25 @@ document.getElementById('btnPontajLunarPDF').addEventListener('click', () => {
     let celule = '';
     toateZilele.forEach((d, idx) => {
       const p = prez[`${m.cod}-${d.iso}`];
-      const we = d.weekend ? 'background:#fef9c3' : '';
+      const weBg = d.weekend ? 'background:#f3f4f6;' : '';
+      const cellStyle = `text-align:center;padding:3px 1px;font-size:9px;width:22px;min-width:22px;${weBg}`;
       // Verific dacă muncitorul era angajat în ziua aia
       const activ = m.dataStart <= d.iso && (!m.dataEnd || m.dataEnd >= d.iso);
       if (!activ) {
-        celule += `<td style="text-align:center;padding:2px;font-size:8px;color:#e5e7eb;background:#f3f4f6">×</td>`;
+        celule += `<td style="${cellStyle}color:#d1d5db;background:#fafafa">×</td>`;
       } else if (!p) {
-        celule += `<td style="text-align:center;padding:2px;font-size:8px;color:#d1d5db;${we}">-</td>`;
+        celule += `<td style="${cellStyle}color:${d.weekend ? '#9ca3af' : '#d1d5db'}">${d.weekend ? '·' : '-'}</td>`;
       } else if (p.absent) {
-        celule += `<td style="text-align:center;padding:2px;font-size:8px;color:#dc2626;font-weight:700;${we}">A</td>`;
+        celule += `<td style="${cellStyle}color:#dc2626;font-weight:700">A</td>`;
       } else if (p.ore > 0) {
         totalMuncitor += p.ore;
-        zilePrezent++;
+        // Numărăm doar zilele lucrătoare ca "zile prezent"
+        if (!d.weekend) zilePrezent++;
         totalPerZi[idx] += p.ore;
         const ore = p.ore === Math.floor(p.ore) ? p.ore.toFixed(0) : p.ore.toFixed(1);
-        celule += `<td style="text-align:center;padding:2px;font-size:8px;color:#1e40af;${we}">${ore}</td>`;
+        celule += `<td style="${cellStyle}color:#1e40af;font-weight:600">${ore}</td>`;
       } else {
-        celule += `<td style="text-align:center;padding:2px;font-size:8px;color:#d1d5db;${we}">-</td>`;
+        celule += `<td style="${cellStyle}color:#d1d5db">-</td>`;
       }
     });
     totalGeneralOre += totalMuncitor;
@@ -2979,14 +2981,14 @@ document.getElementById('btnPontajLunarPDF').addEventListener('click', () => {
   });
 
   // Total per zi rând
-  let totalRow = `<tr style="background:#f3f4f6;font-weight:700">
-    <td colspan="3" style="padding:4px;text-align:right;font-size:10px">TOTAL zi</td>`;
+  let totalRow = `<tr style="background:#e0e7ff;font-weight:700">
+    <td colspan="3" style="padding:6px;text-align:right;font-size:11px;color:#1e40af">TOTAL zi</td>`;
   toateZilele.forEach((d, idx) => {
-    const we = d.weekend ? 'background:#fef9c3' : '';
-    totalRow += `<td style="padding:2px;font-size:8px;text-align:center;${we}">${totalPerZi[idx] > 0 ? totalPerZi[idx].toFixed(0) : '-'}</td>`;
+    const weBg = d.weekend ? 'background:#f3f4f6;' : '';
+    totalRow += `<td style="padding:4px 1px;font-size:9px;text-align:center;width:22px;color:#1e40af;${weBg}">${totalPerZi[idx] > 0 ? totalPerZi[idx].toFixed(0) : '·'}</td>`;
   });
-  totalRow += `<td style="padding:4px;font-size:12px;text-align:right;background:#1e40af;color:white">${totalGeneralOre.toFixed(1)}h</td>`;
-  totalRow += `<td style="padding:4px;font-size:12px;text-align:center;background:#f59e0b;color:white">${totalGeneralZilePrez}</td></tr>`;
+  totalRow += `<td style="padding:6px;font-size:12px;text-align:right;background:#1e40af;color:white">${totalGeneralOre.toFixed(1)}h</td>`;
+  totalRow += `<td style="padding:6px;font-size:12px;text-align:center;background:#f59e0b;color:white">${totalGeneralZilePrez}</td></tr>`;
 
   // Combine header
   const header = headerLuni + headerZile;
@@ -3007,9 +3009,11 @@ a,a:link,a:visited{color:inherit !important;text-decoration:none !important}
 .subtitle{font-size:11px;color:#6b7280;text-align:center;margin-bottom:12px}
 .info-box{background:#f9fafb;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:11px;display:flex;gap:18px;flex-wrap:wrap}
 .info-box b{color:#1e40af}
-table{width:100%;border-collapse:collapse;margin:8px 0}
+table{width:100%;border-collapse:collapse;margin:8px 0;table-layout:auto}
 th{background:#1e40af;color:white;border:1px solid #1e40af}
 td{border:1px solid #e5e7eb}
+tbody tr:nth-child(even) td{background:#fafbff}
+tbody tr:hover td{background:#eff6ff}
 .legend{font-size:10px;color:#6b7280;margin-top:6px;display:flex;gap:14px;flex-wrap:wrap}
 .legend-item{display:flex;align-items:center;gap:4px}
 .legend-cell{display:inline-block;padding:2px 6px;border-radius:3px;font-size:9px}
@@ -3045,10 +3049,12 @@ td{border:1px solid #e5e7eb}
   </table>
 
   <div class="legend">
-    <div class="legend-item"><span class="legend-cell" style="background:#fef9c3">XX</span> Weekend</div>
-    <div class="legend-item"><span class="legend-cell" style="background:#fee2e2;color:#dc2626;font-weight:700">A</span> Absent</div>
-    <div class="legend-item"><span class="legend-cell" style="color:#d1d5db">-</span> Fără pontaj</div>
-    <div class="legend-item"><span class="legend-cell" style="color:#1e40af">8.5</span> Ore lucrate</div>
+    <div class="legend-item"><span class="legend-cell" style="background:#f3f4f6">·</span> Weekend (zile nelucrătoare)</div>
+    <div class="legend-item"><span class="legend-cell" style="color:#dc2626;font-weight:700">A</span> Absent</div>
+    <div class="legend-item"><span class="legend-cell" style="color:#d1d5db">-</span> Fără pontaj înregistrat</div>
+    <div class="legend-item"><span class="legend-cell" style="color:#1e40af;font-weight:600">8.5</span> Ore lucrate</div>
+    <div class="legend-item"><span class="legend-cell" style="background:#fafafa;color:#d1d5db">×</span> Nu era angajat</div>
+    <div class="legend-item"><b style="color:#92400e">Zile lucr.</b> = zile lucrătoare prezent (exclud weekend)</div>
   </div>
 
   <div class="footer">Document intern — ${state.firmaNume || 'iFort Systems SRL'} — generat ${fmtDate(todayISO())}</div>
