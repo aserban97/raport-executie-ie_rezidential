@@ -201,6 +201,7 @@ function adaugaAlocare() {
         <option value="">— Echipă —</option>
         ${echipeOptions}
       </select>
+      <button type="button" class="btn-muncitori-custom" style="font-size:11px;padding:4px 8px;background:#8b5cf6;color:white;border:none;border-radius:4px;cursor:pointer" title="Alege muncitori individual">👷 Muncitori</button>
       <select class="stare-noua">
         <option value="">— Stare —</option>
         <option value="in_lucru">În lucru</option>
@@ -208,6 +209,14 @@ function adaugaAlocare() {
         <option value="blocat">Blocat</option>
       </select>
       <button type="button" class="btn-del">×</button>
+    </div>
+    <div class="muncitori-custom-panel" style="display:none;background:#faf5ff;border:1px solid #8b5cf6;border-radius:6px;padding:8px;margin-top:6px">
+      <div style="font-size:11px;color:#6d28d9;font-weight:600;margin-bottom:4px">👷 Bifează muncitorii care au lucrat aici (suprascrie echipa):</div>
+      <div class="muncitori-checkboxes" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+      <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <button type="button" class="btn-clear-munc" style="font-size:10px;padding:2px 8px;background:#dc2626;color:white;border:none;border-radius:3px;cursor:pointer">Șterge selecția</button>
+        <span class="munc-count" style="font-size:10px;color:#6d28d9;font-weight:600"></span>
+      </div>
     </div>
     <div class="alocare-materiale">${materialeHTML}</div>
     <div style="margin-top:8px;text-align:right">
@@ -225,6 +234,93 @@ function adaugaAlocare() {
     else { customInput.hidden = true; customInput.value = ''; }
   });
   block.querySelector('.btn-sugestii').addEventListener('click', () => aplicaSugestii(block));
+
+  // Panel muncitori custom
+  const muncBtn = block.querySelector('.btn-muncitori-custom');
+  const muncPanel = block.querySelector('.muncitori-custom-panel');
+  const muncContainer = block.querySelector('.muncitori-checkboxes');
+  const muncCount = block.querySelector('.munc-count');
+
+  function refreshMuncCount() {
+    const n = muncContainer.querySelectorAll('input[type=checkbox]:checked').length;
+    if (n > 0) {
+      muncCount.textContent = `✓ ${n} muncitori selectați (va suprascrie echipa)`;
+      muncBtn.style.background = '#10b981';
+      muncBtn.textContent = `👷 ${n} aleși`;
+    } else {
+      muncCount.textContent = '';
+      muncBtn.style.background = '#8b5cf6';
+      muncBtn.textContent = '👷 Muncitori';
+    }
+  }
+
+  function populateMuncitori() {
+    if (muncContainer.children.length > 0) return; // deja populat
+    const azi = document.getElementById('data')?.value || todayISO();
+    const muncActivi = (state.muncitori || []).filter(m => {
+      if (m.dataStart && azi < m.dataStart) return false;
+      if (m.dataEnd && azi > m.dataEnd) return false;
+      return true;
+    }).sort((a, b) => a.cod.localeCompare(b.cod));
+
+    muncContainer.innerHTML = muncActivi.map(m => `
+      <label style="display:inline-flex;align-items:center;gap:3px;background:white;padding:3px 6px;border-radius:4px;border:1px solid #d1d5db;cursor:pointer;font-size:11px">
+        <input type="checkbox" value="${m.cod}" style="margin:0">
+        <span><b>${m.cod}</b> ${m.nume.split(' ')[0]}</span>
+      </label>
+    `).join('') || '<p class="small" style="color:#9ca3af">Niciun muncitor activ</p>';
+
+    muncContainer.querySelectorAll('input[type=checkbox]').forEach(cb => {
+      cb.addEventListener('change', refreshMuncCount);
+    });
+  }
+
+  muncBtn.addEventListener('click', () => {
+    if (muncPanel.style.display === 'none') {
+      populateMuncitori();
+      // Pre-bifez membrii echipei selectate (dacă există)
+      const echId = block.querySelector('.echipa-sel').value;
+      if (echId) {
+        const ech = state.echipe.find(e => e.id === echId);
+        if (ech) {
+          ech.codMembri.forEach(cm => {
+            const cb = muncContainer.querySelector(`input[value="${cm}"]`);
+            if (cb && !cb.dataset.userTouched) cb.checked = true;
+          });
+        }
+      }
+      refreshMuncCount();
+      muncPanel.style.display = 'block';
+    } else {
+      muncPanel.style.display = 'none';
+    }
+  });
+
+  block.querySelector('.btn-clear-munc').addEventListener('click', () => {
+    muncContainer.querySelectorAll('input[type=checkbox]').forEach(cb => {
+      cb.checked = false;
+      cb.dataset.userTouched = '1';
+    });
+    refreshMuncCount();
+  });
+
+  // Când se schimbă echipa, dacă nu ai bifat custom, propune membrii echipei
+  block.querySelector('.echipa-sel').addEventListener('change', () => {
+    if (muncContainer.children.length === 0) return;
+    const anyChecked = muncContainer.querySelector('input:checked');
+    if (!anyChecked) {
+      muncContainer.querySelectorAll('input').forEach(cb => cb.checked = false);
+      const echId = block.querySelector('.echipa-sel').value;
+      if (echId) {
+        const ech = state.echipe.find(e => e.id === echId);
+        if (ech) ech.codMembri.forEach(cm => {
+          const cb = muncContainer.querySelector(`input[value="${cm}"]`);
+          if (cb) cb.checked = true;
+        });
+      }
+      refreshMuncCount();
+    }
+  });
 
   // Auto-completare aux la blur pe tub
   const tubInp = block.querySelector('.mat-qty[data-mat="tub20"]');
@@ -348,9 +444,14 @@ document.getElementById('formRaport').addEventListener('submit', (e) => {
       const v = parseFloat(inp.value);
       if (v > 0) materialeAp[inp.dataset.mat] = v;
     });
-    // Snapshot membri echipă (pentru tracking istoric, chiar dacă schimbi echipa ulterior)
+    // Snapshot membri echipă — PRIORITATE: selecția custom de muncitori > echipa
     let membriEchipa = [];
-    if (echipaId) {
+    const customCheckboxes = block.querySelectorAll('.muncitori-checkboxes input[type=checkbox]:checked');
+    if (customCheckboxes.length > 0) {
+      // Utilizatorul a ales muncitori individual → folosesc selecția lui
+      membriEchipa = Array.from(customCheckboxes).map(cb => cb.value);
+    } else if (echipaId) {
+      // Cad pe echipa selectată
       const ech = state.echipe.find(e => e.id === echipaId);
       if (ech) membriEchipa = [...(ech.codMembri || [])];
     }
@@ -450,6 +551,29 @@ function incarcaRaportPentruEditare(id) {
     last.querySelector('.stare-noua').value = a.stareNoua || '';
     const echSel = last.querySelector('.echipa-sel');
     if (echSel && a.echipaId) echSel.value = a.echipaId;
+    // Pre-bifare muncitori custom dacă există în alocare
+    if (a.membriEchipa && a.membriEchipa.length > 0) {
+      const muncBtn = last.querySelector('.btn-muncitori-custom');
+      const muncPanel = last.querySelector('.muncitori-custom-panel');
+      const muncContainer = last.querySelector('.muncitori-checkboxes');
+      // Populez și apoi bifez
+      muncBtn.click(); // deschide panou + populează
+      a.membriEchipa.forEach(cm => {
+        const cb = muncContainer.querySelector(`input[value="${cm}"]`);
+        if (cb) { cb.checked = true; cb.dataset.userTouched = '1'; }
+      });
+      // Trigger refresh count
+      const evt = new Event('change');
+      muncContainer.querySelector('input')?.dispatchEvent(evt);
+      muncPanel.style.display = 'none'; // închid la loc, doar pre-bifat
+      // Refresh manual count
+      const n = muncContainer.querySelectorAll('input:checked').length;
+      if (n > 0) {
+        const muncCount = last.querySelector('.munc-count');
+        muncBtn.style.background = '#10b981';
+        muncBtn.textContent = `👷 ${n} aleși`;
+      }
+    }
     // materiale
     Object.entries(a.materiale || {}).forEach(([k, v]) => {
       const inp = last.querySelector(`.mat-qty[data-mat="${k}"]`);

@@ -8,6 +8,11 @@ ifort-RECUPERARE-*.json
 SL*.pdf
 Analiz*.pdf
 
+# Documente interne (nu pe GitHub public)
+FUNCTIONALITATI-DE-INTEGRAT.md
+MESAJ-PENTRU-SEF.txt
+*.zip
+
 # Sistem
 .DS_Store
 Thumbs.db
