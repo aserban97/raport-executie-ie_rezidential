@@ -2282,6 +2282,7 @@ function renderPersonal() {
 
   renderListaMuncitoriPrezenta();
   renderPontajEchipeRapid();
+  renderIstoricPontaje();
   renderMuncitoriActivi();
   renderMuncitoriIstoric();
   renderSumarPrezenta();
@@ -2311,6 +2312,106 @@ function calcOreLucrate(oraStart, oraFinal, pauza) {
   if (total < 0) total += 24; // în caz că trece miezul nopții
   total -= (pauza || 0);
   return Math.max(0, Math.round(total * 2) / 2); // pas 0.5h
+}
+
+function renderIstoricPontaje() {
+  const cont = document.getElementById('istoricPontaje');
+  if (!cont) return;
+
+  // Grupez prezența pe zile
+  const peZile = {};
+  (state.prezenta || []).forEach(p => {
+    if (!peZile[p.data]) peZile[p.data] = { total: 0, prezenti: 0, absenti: 0, oreTotale: 0 };
+    peZile[p.data].total++;
+    if (p.absent) peZile[p.data].absenti++;
+    else {
+      peZile[p.data].prezenti++;
+      peZile[p.data].oreTotale += (p.ore || 0);
+    }
+  });
+
+  const zile = Object.keys(peZile).sort().reverse(); // cele mai noi primele
+  if (zile.length === 0) {
+    cont.innerHTML = '<div class="empty">Niciun pontaj salvat încă</div>';
+    return;
+  }
+
+  // Filtru lună
+  const luni = [...new Set(zile.map(z => z.slice(0, 7)))].sort().reverse();
+  let html = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+    <label style="font-size:12px;color:#6b7280">Filtrează lună:</label>
+    <select id="filtruLunaIstoric" style="padding:6px;border:1px solid #d1d5db;border-radius:4px">
+      <option value="">— Toate —</option>
+      ${luni.map(l => `<option value="${l}">${l}</option>`).join('')}
+    </select>
+    <span style="font-size:11px;color:#6b7280;margin-left:auto">${zile.length} zile cu pontaj</span>
+  </div>`;
+
+  html += '<div id="listaZilePontaj" style="display:flex;flex-direction:column;gap:6px;max-height:400px;overflow-y:auto">';
+  zile.forEach(data => {
+    const z = peZile[data];
+    const d = new Date(data);
+    const nrZi = ['Du', 'Lu', 'Ma', 'Mi', 'Jo', 'Vi', 'Sâ'][d.getDay()];
+    const weekend = d.getDay() === 0 || d.getDay() === 6;
+    html += `<div class="zi-pontaj" data-zi="${data}" data-luna="${data.slice(0, 7)}" style="background:${weekend ? '#fef3c7' : '#f9fafb'};border:1px solid #d1d5db;border-radius:6px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:12px;transition:all 0.15s" onmouseover="this.style.borderColor='#1e40af';this.style.background='#dbeafe'" onmouseout="this.style.borderColor='#d1d5db';this.style.background='${weekend ? '#fef3c7' : '#f9fafb'}'">
+      <div style="min-width:55px;text-align:center">
+        <div style="font-size:11px;color:#6b7280;font-weight:600">${nrZi}</div>
+        <div style="font-size:14px;font-weight:700;color:${weekend ? '#92400e' : '#1e40af'}">${data.slice(8, 10)}.${data.slice(5, 7)}</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:600">${z.prezenti} prezenți${z.absenti > 0 ? ` <span style="color:#dc2626;font-weight:normal;font-size:11px">(${z.absenti} absenți)</span>` : ''}</div>
+        <div style="font-size:11px;color:#6b7280">${z.oreTotale.toFixed(1)}h totale lucrate</div>
+      </div>
+      <button type="button" data-edit-zi="${data}" style="font-size:11px;padding:6px 12px;background:#1e40af;color:white;border:none;border-radius:4px;cursor:pointer;flex-shrink:0">✏️ Editează</button>
+      <button type="button" data-del-zi="${data}" style="font-size:11px;padding:6px 10px;background:#dc2626;color:white;border:none;border-radius:4px;cursor:pointer;flex-shrink:0" title="Șterge pontajul acestei zile">🗑️</button>
+    </div>`;
+  });
+  html += '</div>';
+
+  cont.innerHTML = html;
+
+  // Filtrare lună
+  document.getElementById('filtruLunaIstoric').addEventListener('change', (e) => {
+    const luna = e.target.value;
+    cont.querySelectorAll('.zi-pontaj').forEach(el => {
+      if (!luna || el.dataset.luna === luna) el.style.display = 'flex';
+      else el.style.display = 'none';
+    });
+  });
+
+  // Edit zi → încarcă în formular sus
+  cont.querySelectorAll('[data-edit-zi]').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const data = b.dataset.editZi;
+    document.getElementById('pontajData').value = data;
+    renderListaMuncitoriPrezenta();
+    renderPontajEchipeRapid();
+    // Scroll la formularul pontaj
+    document.getElementById('pontajData').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    toast(`Pontaj ${fmtDate(data)} încărcat pentru editare`);
+  }));
+
+  // Click pe rând = same as edit
+  cont.querySelectorAll('.zi-pontaj').forEach(el => el.addEventListener('click', (e) => {
+    if (e.target.tagName === 'BUTTON') return;
+    const data = el.dataset.zi;
+    document.getElementById('pontajData').value = data;
+    renderListaMuncitoriPrezenta();
+    renderPontajEchipeRapid();
+    document.getElementById('pontajData').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    toast(`Pontaj ${fmtDate(data)} încărcat pentru editare`);
+  }));
+
+  // Șterge zi pontaj
+  cont.querySelectorAll('[data-del-zi]').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const data = b.dataset.delZi;
+    if (!confirm(`Ștergi tot pontajul din ${fmtDate(data)}?`)) return;
+    state.prezenta = state.prezenta.filter(p => p.data !== data);
+    save();
+    renderPersonal();
+    toast(`Pontaj din ${fmtDate(data)} șters ✓`);
+  }));
 }
 
 function renderPontajEchipeRapid() {
@@ -2501,6 +2602,7 @@ document.getElementById('btnSavePontaj').addEventListener('click', () => {
   save();
   toast(`Pontaj salvat: ${totalSalvat} prezenți ✓`);
   renderSumarPrezenta();
+  renderIstoricPontaje();
 });
 
 const btnPontajClear = document.getElementById('btnPontajClear');
