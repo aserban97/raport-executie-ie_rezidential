@@ -2522,27 +2522,60 @@ function renderMuncitoriActivi() {
     return;
   }
   cont.innerHTML = activi.map(m => `
-    <div class="raport-item">
+    <div class="raport-item" data-munc-row="${m.id}">
       <div class="head">
         <strong>${m.cod} — ${m.nume}</strong>
-        <span class="info">început: ${fmtDate(m.dataStart)}</span>
+        <span class="info">început: ${fmtDate(m.dataStart)}${m.dataEnd ? ` → plecat: ${fmtDate(m.dataEnd)}` : ''}</span>
       </div>
       <div class="btns">
-        <button class="btn-secondary" data-end="${m.id}">📅 Marcheaza plecat</button>
+        <button class="btn-secondary" data-edit-m="${m.id}">✏️ Editează date</button>
         <button class="btn-del" data-del-m="${m.id}">Șterge</button>
+      </div>
+      <div class="edit-munc-panel" style="display:none;background:#f9fafb;border:2px solid #1e40af;border-radius:8px;padding:12px;margin-top:8px">
+        <div style="font-size:12px;color:#1e40af;font-weight:600;margin-bottom:8px">✏️ Editează datele pentru ${m.cod} — ${m.nume}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <label style="display:block">
+            <span style="font-size:11px;color:#6b7280">Data start</span>
+            <input type="date" class="edit-start" value="${m.dataStart || ''}" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px;font-size:14px">
+          </label>
+          <label style="display:block">
+            <span style="font-size:11px;color:#6b7280">Data plecare (gol = activ)</span>
+            <input type="date" class="edit-end" value="${m.dataEnd || ''}" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px;font-size:14px">
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn-primary save-munc" style="font-size:12px;padding:6px 14px">💾 Salvează</button>
+          <button type="button" class="btn-secondary cancel-edit-munc" style="font-size:12px;padding:6px 14px">Anulează</button>
+        </div>
       </div>
     </div>
   `).join('');
 
-  cont.querySelectorAll('[data-end]').forEach(b => b.addEventListener('click', () => {
-    const m = state.muncitori.find(x => x.id === b.dataset.end);
-    if (!m) return;
-    const data = prompt(`Data plecării pentru ${m.cod} — ${m.nume} (YYYY-MM-DD):`, todayISO());
-    if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) return;
-    m.dataEnd = data;
-    save(); renderPersonal();
-    toast('Marcat ca plecat ✓');
+  cont.querySelectorAll('[data-edit-m]').forEach(b => b.addEventListener('click', () => {
+    const row = cont.querySelector(`[data-munc-row="${b.dataset.editM}"]`);
+    const panel = row.querySelector('.edit-munc-panel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
   }));
+
+  cont.querySelectorAll('.cancel-edit-munc').forEach(b => b.addEventListener('click', (e) => {
+    e.target.closest('.edit-munc-panel').style.display = 'none';
+  }));
+
+  cont.querySelectorAll('.save-munc').forEach(b => b.addEventListener('click', (e) => {
+    const row = e.target.closest('[data-munc-row]');
+    const id = row.dataset.muncRow;
+    const m = state.muncitori.find(x => x.id === id);
+    if (!m) return;
+    const newStart = row.querySelector('.edit-start').value;
+    const newEnd = row.querySelector('.edit-end').value || null;
+    if (!newStart) { toast('Data start obligatorie'); return; }
+    if (newEnd && newEnd < newStart) { toast('Data plecare nu poate fi înainte de start'); return; }
+    m.dataStart = newStart;
+    m.dataEnd = newEnd;
+    save(); renderPersonal();
+    toast('Datele actualizate ✓');
+  }));
+
   cont.querySelectorAll('[data-del-m]').forEach(b => b.addEventListener('click', () => {
     if (!confirm('Șterge muncitorul DEFINITIV? Istoricul prezenței rămâne.')) return;
     state.muncitori = state.muncitori.filter(x => x.id !== b.dataset.delM);
@@ -2559,13 +2592,62 @@ function renderMuncitoriIstoric() {
     return;
   }
   cont.innerHTML = istoric.map(m => `
-    <div class="raport-item">
+    <div class="raport-item" data-munc-row="${m.id}">
       <div class="head">
         <strong>${m.cod} — ${m.nume}</strong>
         <span class="info">${fmtDate(m.dataStart)} → ${fmtDate(m.dataEnd)}</span>
       </div>
+      <div class="btns">
+        <button class="btn-secondary" data-edit-m="${m.id}">✏️ Editează date</button>
+        <button class="btn-del" data-del-m="${m.id}">Șterge</button>
+      </div>
+      <div class="edit-munc-panel" style="display:none;background:#f9fafb;border:2px solid #1e40af;border-radius:8px;padding:12px;margin-top:8px">
+        <div style="font-size:12px;color:#1e40af;font-weight:600;margin-bottom:8px">✏️ Editează datele pentru ${m.cod} — ${m.nume}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <label style="display:block">
+            <span style="font-size:11px;color:#6b7280">Data start</span>
+            <input type="date" class="edit-start" value="${m.dataStart || ''}" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px;font-size:14px">
+          </label>
+          <label style="display:block">
+            <span style="font-size:11px;color:#6b7280">Data plecare (gol = reactivează)</span>
+            <input type="date" class="edit-end" value="${m.dataEnd || ''}" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px;font-size:14px">
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn-primary save-munc" style="font-size:12px;padding:6px 14px">💾 Salvează</button>
+          <button type="button" class="btn-secondary cancel-edit-munc" style="font-size:12px;padding:6px 14px">Anulează</button>
+        </div>
+      </div>
     </div>
   `).join('');
+
+  cont.querySelectorAll('[data-edit-m]').forEach(b => b.addEventListener('click', () => {
+    const row = cont.querySelector(`[data-munc-row="${b.dataset.editM}"]`);
+    const panel = row.querySelector('.edit-munc-panel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  }));
+  cont.querySelectorAll('.cancel-edit-munc').forEach(b => b.addEventListener('click', (e) => {
+    e.target.closest('.edit-munc-panel').style.display = 'none';
+  }));
+  cont.querySelectorAll('.save-munc').forEach(b => b.addEventListener('click', (e) => {
+    const row = e.target.closest('[data-munc-row]');
+    const id = row.dataset.muncRow;
+    const m = state.muncitori.find(x => x.id === id);
+    if (!m) return;
+    const newStart = row.querySelector('.edit-start').value;
+    const newEnd = row.querySelector('.edit-end').value || null;
+    if (!newStart) { toast('Data start obligatorie'); return; }
+    if (newEnd && newEnd < newStart) { toast('Data plecare nu poate fi înainte de start'); return; }
+    m.dataStart = newStart;
+    m.dataEnd = newEnd;
+    save(); renderPersonal();
+    toast('Datele actualizate ✓');
+  }));
+  cont.querySelectorAll('[data-del-m]').forEach(b => b.addEventListener('click', () => {
+    if (!confirm('Șterge muncitorul DEFINITIV? Istoricul prezenței rămâne.')) return;
+    state.muncitori = state.muncitori.filter(x => x.id !== b.dataset.delM);
+    save(); renderPersonal();
+  }));
 }
 
 document.getElementById('formMuncitor').addEventListener('submit', (e) => {
